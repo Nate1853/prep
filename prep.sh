@@ -311,11 +311,15 @@ set_no_sleep() {
 }
 
 enable_vkms() {
-  if lsmod | grep -q '^vkms ' && grep -qxs vkms /etc/modules-load.d/vkms.conf; then
+  local loaded=0 conf=0
+  [ -d /sys/module/vkms ] && loaded=1                                  # loaded or built-in
+  grep -qxs vkms /etc/modules-load.d/vkms.conf && conf=1               # set to autoload at boot
+  echo "vkms loaded now: $loaded   autoload configured: $conf"
+  if [ "$loaded" -eq 1 ] && [ "$conf" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
-  sudo modprobe vkms || return 1
-  echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
+  [ "$loaded" -eq 1 ] || sudo modprobe vkms || return 1
+  [ "$conf" -eq 1 ]   || echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
   echo "##STATUS##successfully configured"
 }
 
@@ -329,7 +333,7 @@ enable_krdp() {
   if systemctl is-active --quiet firewalld; then
     sudo firewall-cmd --query-port=3389/tcp >/dev/null 2>&1 || fw_ok=0
   fi
-  if rpm -q krdp-server >/dev/null 2>&1 \
+  if command -v krdpserver >/dev/null 2>&1 \
      && [ -f "$crt" ] && [ -f "$key" ] \
      && [ "$(kreadconfig6 --file krdpserverrc --group General --key SystemUserEnabled)" = "true" ] \
      && [ "$(kreadconfig6 --file krdpserverrc --group General --key Autostart)" = "true" ] \
@@ -338,7 +342,7 @@ enable_krdp() {
     echo "##STATUS##already configured"; return 0
   fi
 
-  rpm -q krdp-server >/dev/null 2>&1 || sudo dnf install -y krdp-server || return 1
+  command -v krdpserver >/dev/null 2>&1 || sudo dnf install -y krdp-server || return 1
   mkdir -p "$krdp_dir"
   if [ ! -f "$crt" ] || [ ! -f "$key" ]; then
     openssl req -nodes -new -x509 -keyout "$key" -out "$crt" -days 3650 -batch || return 1
