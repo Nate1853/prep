@@ -94,6 +94,15 @@ EOF
   echo "##STATUS##successfully installed"
 }
 
+set_default_browser() {
+  local target="google-chrome.desktop"
+  if [ "$(xdg-settings get default-web-browser 2>/dev/null)" = "$target" ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  xdg-settings set default-web-browser "$target" || return 1
+  echo "##STATUS##successfully configured"
+}
+
 enable_vkms() {
   if lsmod | grep -q '^vkms ' && grep -qxs vkms /etc/modules-load.d/vkms.conf; then
     echo "##STATUS##already configured"; return 0
@@ -180,6 +189,7 @@ run_step "Enable KRDP remote desktop"     enable_krdp
 run_step "Virtual display (vkms)"         enable_vkms
 run_step "Install fastfetch"              install_pkg fastfetch
 run_step "Install Google Chrome"          install_chrome
+run_step "Set Chrome as default browser"  set_default_browser
 run_step "Install sshpass"                install_pkg sshpass
 run_step "Install expect"                 install_pkg expect
 run_step "Install cups"                   install_pkg cups
