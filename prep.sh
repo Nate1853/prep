@@ -160,11 +160,24 @@ check_fedora() {
   if ! rpm -q plasma-workspace >/dev/null 2>&1 && ! command -v plasmashell >/dev/null 2>&1; then
     echo "KDE Plasma not detected — this script targets the Fedora KDE spin"; return 1
   fi
-  echo "Fedora ${VERSION_ID} (KDE Plasma) detected"
+  # Wayland session (KRDP requires it). Env first, then logind for the graphical session.
+  local wl="${XDG_SESSION_TYPE:-}"
+  [ -z "$wl" ] && [ -n "${WAYLAND_DISPLAY:-}" ] && wl="wayland"
+  if [ "$wl" != "wayland" ]; then
+    local s; s="$(loginctl show-user "$USER" -p Display --value 2>/dev/null)"
+    [ -n "$s" ] && wl="$(loginctl show-session "$s" -p Type --value 2>/dev/null)"
+  fi
+  [ "$wl" = "wayland" ] || { echo "Not a Wayland session (type=${wl:-unknown}) — KRDP requires Wayland"; return 1; }
+  echo "Fedora ${VERSION_ID} (KDE Plasma, Wayland) detected"
 }
 
 check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
+  local memkb gib
+  memkb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
+  gib=$(( (memkb + 524288) / 1048576 ))   # round kB to nearest GiB
+  [ "$gib" -ge 8 ] || { echo "Only ${gib} GiB RAM detected (need 8 GB+)"; return 1; }
+  echo "AMD CPU, ${gib} GiB RAM"
 }
 
 upgrade_system() {
@@ -391,8 +404,8 @@ enable_ssh() {
 }
 
 # ---- register the items (desc, command) ----
-add_step "Fedora 44+ (KDE)"              "check_fedora"
-add_step "AMD CPU"                       "check_amd"
+add_step "Fedora 44+ (KDE, Wayland)"     "check_fedora"
+add_step "AMD CPU + 8GB+ RAM"            "check_amd"
 add_step "Upgrade system packages"       "upgrade_system"
 add_step "Enable OpenSSH + open firewall" "enable_ssh"
 add_step "Enable KRDP remote desktop"    "enable_krdp"
