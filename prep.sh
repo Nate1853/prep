@@ -32,10 +32,12 @@ run_step() {
   tput cnorm 2>/dev/null || true
 
   local cols; cols="$(tput cols 2>/dev/null || echo 80)"
+  local pad=$(( cols - ${#desc} - 3 )); [ "$pad" -lt 1 ] && pad=1
+  local dots; dots="$(printf '%*s' "$pad" '' | tr ' ' '.')"
   if [ "$rc" -eq 0 ]; then
-    printf '\r\033[K%s\033[%dG✅\n' "$desc" "$((cols - 1))"
+    printf '\r\033[K%s %s✅\n' "$desc" "$dots"
   else
-    printf '\r\033[K%s\033[%dG❌\n' "$desc" "$((cols - 1))"
+    printf '\r\033[K%s %s❌\n' "$desc" "$dots"
     sed 's/^/    /' "$log"
   fi
   rm -f "$log"
@@ -67,6 +69,7 @@ enable_krdp() {
   kwriteconfig6 --file krdpserverrc --group General --key Certificate "$crt" || return 1
   kwriteconfig6 --file krdpserverrc --group General --key CertificateKey "$key" || return 1
   kwriteconfig6 --file krdpserverrc --group General --key SystemUserEnabled true || return 1
+  kwriteconfig6 --file krdpserverrc --group General --key Autostart true || return 1
 
   systemctl --user enable --now app-org.kde.krdpserver.service || return 1
 
