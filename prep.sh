@@ -41,7 +41,7 @@ run_step() {
     grep -qiE 'already installed|nothing to do'      "$log" && note+=" (already installed)"
     grep -qE  '^Installed:|successfully installed'   "$log" && note+=" (installed)"
   fi
-  grep -qiE 'reboot|restart' "$log" && note+=" (requires restart)"
+  grep -q '^##RESTART##' "$log" && note+=" (reboot required)"
 
   local cols; cols="$(tput cols 2>/dev/null)"
   [[ "$cols" =~ ^[0-9]+$ ]] || cols="${COLUMNS:-80}"
@@ -53,7 +53,7 @@ run_step() {
   local note_disp=""; [ -n "$note" ] && note_disp="${C_DIM}${note}${C_RESET}"
 
   printf '\r\033[K%s %s%s %s\n' "$desc" "$dots" "$note_disp" "$emoji"
-  [ "$rc" -eq 0 ] || grep -v '^##STATUS##' "$log" | sed 's/^/    /'
+  [ "$rc" -eq 0 ] || grep -vE '^##(STATUS|RESTART)##' "$log" | sed 's/^/    /'
   rm -f "$log"
   return "$rc"
 }
@@ -67,6 +67,20 @@ check_fedora() {
 
 check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
+}
+
+upgrade_system() {
+  local out
+  out="$(sudo dnf upgrade --refresh -y 2>&1)" || { printf '%s\n' "$out"; return 1; }
+  if printf '%s' "$out" | grep -qiE 'nothing to do'; then
+    echo "##STATUS##already up to date"
+  else
+    echo "##STATUS##successfully updated"
+  fi
+  # Fedora reboot hint: needs-restarting -r exits 1 when a reboot is advised.
+  local r; sudo dnf needs-restarting -r >/dev/null 2>&1; r=$?
+  [ "$r" -eq 1 ] && echo "##RESTART##"
+  return 0
 }
 
 install_pkg() {
@@ -107,6 +121,7 @@ setup_conda() {
       echo "$2" | sudo tee "$f" >/dev/null || return 1
       changed=1
     fi
+    sudo chmod 0440 "$f" || return 1   # sudoers.d files must be 0440
   }
   _sudoers uibolt-nic "$me ALL=(ALL) NOPASSWD: /usr/bin/rm, /usr/sbin/ip, /usr/bin/tee, /usr/bin/udevadm, /usr/bin/systemctl, /usr/bin/networkctl, /usr/sbin/arping" || return 1
   _sudoers uibolt-dnf "$me ALL=(ALL) SETENV: NOPASSWD: /usr/bin/dnf, /usr/bin/rpm" || return 1
@@ -223,7 +238,7 @@ echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
 
 run_step "Fedora 44 or later"     check_fedora || exit 1
 run_step "AMD CPU"                check_amd    || exit 1
-run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
+run_step "Upgrade system packages" upgrade_system
 run_step "Enable OpenSSH + open firewall" enable_ssh
 run_step "Enable KRDP remote desktop"     enable_krdp
 run_step "Virtual display (vkms)"         enable_vkms
