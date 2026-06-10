@@ -68,6 +68,30 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
+install_fastfetch() {
+  if rpm -q fastfetch >/dev/null 2>&1; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  sudo dnf install -y fastfetch || return 1
+  echo "##STATUS##successfully configured"
+}
+
+install_chrome() {
+  if rpm -q google-chrome-stable >/dev/null 2>&1; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  sudo tee /etc/yum.repos.d/google-chrome.repo >/dev/null <<'EOF'
+[google-chrome]
+name=google-chrome
+baseurl=https://dl.google.com/linux/chrome/rpm/stable/x86_64
+enabled=1
+gpgcheck=1
+gpgkey=https://dl.google.com/linux/linux_signing_key.pub
+EOF
+  sudo dnf install -y google-chrome-stable || return 1
+  echo "##STATUS##successfully configured"
+}
+
 enable_vkms() {
   if lsmod | grep -q '^vkms ' && grep -qxs vkms /etc/modules-load.d/vkms.conf; then
     echo "##STATUS##already configured"; return 0
@@ -152,5 +176,7 @@ run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
 run_step "Enable OpenSSH + open firewall" enable_ssh
 run_step "Enable KRDP remote desktop"     enable_krdp
 run_step "Virtual display (vkms)"         enable_vkms
+run_step "Install fastfetch"              install_fastfetch
+run_step "Install Google Chrome"          install_chrome
 
 echo "${C_GREEN}Done.${C_RESET}"
