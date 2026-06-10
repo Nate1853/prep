@@ -8,10 +8,13 @@ set -uo pipefail
 
 # ---- colors ----
 if [ -t 1 ]; then
-  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_DIM=$'\033[2m'; C_RESET=$'\033[0m'
+  C_GREEN=$'\033[32m'; C_RED=$'\033[31m'; C_DIM=$'\033[2m'; C_HDR=$'\033[1;36m'; C_RESET=$'\033[0m'
 else
-  C_GREEN=''; C_RED=''; C_DIM=''; C_RESET=''
+  C_GREEN=''; C_RED=''; C_DIM=''; C_HDR=''; C_RESET=''
 fi
+
+# A banner printed into the verbose stream so each item's output is identifiable.
+banner() { printf '\n%s━━━━━━━━━━ %s ━━━━━━━━━━%s\n' "$C_HDR" "$1" "$C_RESET"; }
 
 # ---- dashboard engine: fixed status box at the bottom, verbose scrolls above ----
 DESCS=(); CMDS=(); STATE=(); NOTE=()
@@ -98,6 +101,7 @@ _status_of() { # $1=rc  $2=statusfile  -> sets REPLY_STATE / REPLY_NOTE
 run_step() { # dashboard mode; $1=index
   local i="$1" sf; sf="$(mktemp)"
   STATE[i]="run"; draw_item "$i"; goto_scroll
+  banner "${DESCS[i]}"
   _run_capture "$i" "$sf"   # verbose prints straight into the scroll region
   local rc=$?
   _status_of "$rc" "$sf"
@@ -109,7 +113,7 @@ run_step() { # dashboard mode; $1=index
 
 run_step_plain() { # fallback (no TTY / tiny terminal); $1=index
   local i="$1" sf; sf="$(mktemp)"
-  printf '%s──\n' "${DESCS[i]}"
+  banner "${DESCS[i]}"
   _run_capture "$i" "$sf" | sed 's/^/    /'
   local rc=${PIPESTATUS[0]}
   _status_of "$rc" "$sf"
@@ -131,8 +135,10 @@ check_amd() {
 }
 
 upgrade_system() {
-  local out
-  out="$(sudo dnf upgrade --refresh -y 2>&1)" || { printf '%s\n' "$out"; return 1; }
+  local out rc
+  out="$(sudo dnf upgrade --refresh -y 2>&1)"; rc=$?
+  printf '%s\n' "$out"
+  [ "$rc" -ne 0 ] && return 1
   if printf '%s' "$out" | grep -qiE 'nothing to do'; then
     echo "##STATUS##already up to date"
   else
@@ -145,8 +151,10 @@ upgrade_system() {
 }
 
 install_pkg() {
-  local pkg="$1" out
-  out="$(sudo dnf install -y "$pkg" 2>&1)" || { printf '%s\n' "$out"; return 1; }
+  local pkg="$1" out rc
+  out="$(sudo dnf install -y "$pkg" 2>&1)"; rc=$?
+  printf '%s\n' "$out"
+  [ "$rc" -ne 0 ] && return 1
   if printf '%s' "$out" | grep -qiE 'nothing to do|already installed'; then
     echo "##STATUS##already installed"
   else
@@ -208,6 +216,17 @@ setup_conda() {
   fi
 
   [ "$changed" -eq 1 ] && echo "##STATUS##successfully configured" || echo "##STATUS##already configured"
+}
+
+activate_venv() {
+  local conda="$HOME/miniconda3/bin/conda" line="conda activate venv"
+  # Confirm the env exists, then make every new shell start in it.
+  "$conda" env list | awk '{print $1}' | grep -qx venv || { echo "venv environment not found"; return 1; }
+  if grep -qxF "$line" "$HOME/.bashrc" 2>/dev/null; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  printf '%s\n' "$line" >> "$HOME/.bashrc" || return 1
+  echo "##STATUS##successfully configured"
 }
 
 set_default_browser() {
@@ -308,6 +327,7 @@ add_step "Install arping"                "install_pkg arping"
 add_step "Install net-tools"             "install_pkg net-tools"
 add_step "Install iperf3"                "install_pkg iperf3"
 add_step "Conda + venv environment"      "setup_conda"
+add_step "Activate venv on login"        "activate_venv"
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
