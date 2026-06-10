@@ -248,6 +248,20 @@ set_default_browser() {
   echo "##STATUS##successfully configured"
 }
 
+set_no_sleep() {
+  # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
+  local targets="sleep.target suspend.target hibernate.target hybrid-sleep.target"
+  local all_masked=1 t
+  for t in $targets; do
+    [ "$(systemctl is-enabled "$t" 2>/dev/null)" = "masked" ] || all_masked=0
+  done
+  if [ "$all_masked" -eq 1 ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  sudo systemctl mask $targets || return 1
+  echo "##STATUS##successfully configured"
+}
+
 enable_vkms() {
   if lsmod | grep -q '^vkms ' && grep -qxs vkms /etc/modules-load.d/vkms.conf; then
     echo "##STATUS##already configured"; return 0
@@ -327,6 +341,7 @@ add_step "Upgrade system packages"       "upgrade_system"
 add_step "Enable OpenSSH + open firewall" "enable_ssh"
 add_step "Enable KRDP remote desktop"    "enable_krdp"
 add_step "Virtual display (vkms)"        "enable_vkms"
+add_step "Never sleep when idle"         "set_no_sleep"
 add_step "Install fastfetch"             "install_pkg fastfetch"
 add_step "Install Google Chrome"         "install_chrome"
 add_step "Set Chrome as default browser" "set_default_browser"
