@@ -70,12 +70,13 @@ check_amd() {
 }
 
 install_pkg() {
-  local pkg="$1"
-  if rpm -q "$pkg" >/dev/null 2>&1; then
-    echo "##STATUS##already installed"; return 0
+  local pkg="$1" out
+  out="$(sudo dnf install -y "$pkg" 2>&1)" || { printf '%s\n' "$out"; return 1; }
+  if printf '%s' "$out" | grep -qiE 'nothing to do|already installed'; then
+    echo "##STATUS##already installed"
+  else
+    echo "##STATUS##successfully installed"
   fi
-  sudo dnf install -y "$pkg" || return 1
-  echo "##STATUS##successfully installed"
 }
 
 install_chrome() {
