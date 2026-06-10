@@ -192,15 +192,16 @@ check_amd() {
 }
 
 upgrade_system() {
-  local out rc
-  out="$(sudo dnf upgrade --refresh -y 2>&1)"; rc=$?
-  printf '%s\n' "$out"
-  [ "$rc" -ne 0 ] && return 1
-  if printf '%s' "$out" | grep -qiE 'nothing to do'; then
+  local logf rc; logf="$(mktemp)"
+  sudo dnf upgrade --refresh -y 2>&1 | tee "$logf"   # stream live AND capture
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ]; then rm -f "$logf"; return 1; fi
+  if grep -qiE 'nothing to do' "$logf"; then
     echo "##STATUS##already up to date"
   else
     echo "##STATUS##successfully updated"
   fi
+  rm -f "$logf"
   # Fedora reboot hint: needs-restarting -r exits 1 when a reboot is advised.
   local r; sudo dnf needs-restarting -r >/dev/null 2>&1; r=$?
   [ "$r" -eq 1 ] && echo "##RESTART##"
@@ -208,15 +209,16 @@ upgrade_system() {
 }
 
 install_pkg() {
-  local pkg="$1" out rc
-  out="$(sudo dnf install -y "$pkg" 2>&1)"; rc=$?
-  printf '%s\n' "$out"
-  [ "$rc" -ne 0 ] && return 1
-  if printf '%s' "$out" | grep -qiE 'nothing to do|already installed'; then
+  local pkg="$1" logf rc; logf="$(mktemp)"
+  sudo dnf install -y "$pkg" 2>&1 | tee "$logf"      # stream live AND capture
+  rc=${PIPESTATUS[0]}
+  if [ "$rc" -ne 0 ]; then rm -f "$logf"; return 1; fi
+  if grep -qiE 'nothing to do|already installed' "$logf"; then
     echo "##STATUS##already installed"
   else
     echo "##STATUS##successfully installed"
   fi
+  rm -f "$logf"
 }
 
 install_chrome() {
