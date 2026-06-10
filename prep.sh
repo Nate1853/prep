@@ -157,6 +157,10 @@ check_fedora() {
   . /etc/os-release 2>/dev/null || { echo "Cannot read /etc/os-release"; return 1; }
   [ "${ID:-}" = "fedora" ] || { echo "Not Fedora (ID=${ID:-unknown})"; return 1; }
   [ "${VERSION_ID:-0}" -ge 44 ] 2>/dev/null || { echo "Fedora ${VERSION_ID:-?} is older than 44"; return 1; }
+  if ! rpm -q plasma-workspace >/dev/null 2>&1 && ! command -v plasmashell >/dev/null 2>&1; then
+    echo "KDE Plasma not detected — this script targets the Fedora KDE spin"; return 1
+  fi
+  echo "Fedora ${VERSION_ID} (KDE Plasma) detected"
 }
 
 check_amd() {
@@ -387,7 +391,7 @@ enable_ssh() {
 }
 
 # ---- register the items (desc, command) ----
-add_step "Fedora 44 or later"            "check_fedora"
+add_step "Fedora 44+ (KDE)"              "check_fedora"
 add_step "AMD CPU"                       "check_amd"
 add_step "Upgrade system packages"       "upgrade_system"
 add_step "Enable OpenSSH + open firewall" "enable_ssh"
