@@ -248,6 +248,20 @@ set_default_browser() {
   echo "##STATUS##successfully configured"
 }
 
+setup_appdir() {
+  local d="$HOME/Documents/Applications"
+  if [ -d "$d" ]; then
+    echo "##STATUS##already exists"; return 0
+  fi
+  mkdir -p "$d" || return 1
+  echo "##STATUS##created"
+}
+
+clone_hint() {
+  printf '%sWhen ready, clone the project:%s\n' "$C_HDR" "$C_RESET"
+  printf '  cd ~/Documents/Applications && git clone https://github.com/ubiquiti/refurbishment-ui-bolt.git\n'
+}
+
 set_no_sleep() {
   # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
   # Masking the sleep targets is authoritative: any suspend attempt (logind,
@@ -358,6 +372,7 @@ add_step "Install net-tools"             "install_pkg net-tools"
 add_step "Install iperf3"                "install_pkg iperf3"
 add_step "Conda + venv (python 3.12.11)" "setup_conda"
 add_step "Activate venv on login"        "activate_venv"
+add_step "Documents/Applications folder" "setup_appdir"
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
@@ -378,6 +393,7 @@ if [ "$USE_DASH" -eq 1 ]; then
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
   final_tip
+  clone_hint
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
@@ -385,4 +401,5 @@ else
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
   final_tip
+  clone_hint
 fi
