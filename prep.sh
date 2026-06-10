@@ -21,7 +21,7 @@ next_steps() {
   printf '\n%sNext steps:%s\n' "$C_HDR" "$C_RESET"
   if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
     printf '\n%sactivate venv:%s\n' "$C_DIM" "$C_RESET"
-    printf '  conda activate venv\n'
+    printf '  exec bash\n'
   fi
   if [ ! -d "$HOME/Documents/Applications/refurbishment-ui-bolt" ]; then
     printf '\n%sget the project (run when ready):%s\n' "$C_DIM" "$C_RESET"
