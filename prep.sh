@@ -13,48 +13,109 @@ else
   C_GREEN=''; C_RED=''; C_DIM=''; C_RESET=''
 fi
 
-# ---- per-item step runner: spinner while running, ✓/✗ in place ----
-run_step() {
-  local desc="$1"; shift
-  local log; log="$(mktemp)"
+# ---- dashboard engine: fixed status box at the bottom, verbose scrolls above ----
+DESCS=(); CMDS=(); STATE=(); NOTE=()
+add_step() { DESCS+=("$1"); CMDS+=("$2"); STATE+=("pending"); NOTE+=(""); }
 
-  "$@" >"$log" 2>&1 &
-  local pid=$!
+repeat() { local n="$1" s="$2" o=""; while [ "$n" -gt 0 ]; do o+="$s"; n=$((n - 1)); done; printf '%s' "$o"; }
 
-  local frames='⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏' i=0
+DASH_ACTIVE=0
+goto_scroll() { printf '\033[%d;1H' "$DASH_SR"; }
+
+draw_border() { # $1=row  $2=top|bottom
+  local row="$1" lc rc
+  if [ "$2" = top ]; then lc="╭"; rc="╮"; else lc="╰"; rc="╯"; fi
+  printf '\033[%d;1H\033[K%s%s%s' "$row" "$lc" "$(repeat $((DASH_COLS - 2)) '─')" "$rc"
+  [ "$2" = top ] && printf '\033[%d;3H┤ %sFedora prep%s ├' "$row" "$C_GREEN" "$C_RESET"
+}
+
+draw_item() { # $1=index
+  local i="$1" icon row st note desc
+  st="${STATE[i]}"; note="${NOTE[i]}"; desc="${DESCS[i]}"
+  case "$st" in
+    run) icon="⏳";; ok) icon="✅";; already) icon="☑️";; fail) icon="❌";; *) icon="⬜";;
+  esac
+  row=$(( DASH_BOX_TOP + 1 + i ))
+  local dn=$(( DASH_COLS - 2 - 6 - ${#desc} - ${#note} )); [ "$dn" -lt 1 ] && dn=1
+  printf '\033[%d;1H\033[K│ %s %s %s ' "$row" "$icon" "$desc" "$(repeat "$dn" '.')"
+  [ -n "$note" ] && printf '%s%s%s ' "$C_DIM" "$note" "$C_RESET"
+  printf '\033[%d;%dH│' "$row" "$DASH_COLS"
+}
+
+draw_all() {
+  draw_border "$DASH_BOX_TOP" top
+  local i; for i in "${!DESCS[@]}"; do draw_item "$i"; done
+  draw_border "$(( DASH_BOX_TOP + ${#DESCS[@]} + 1 ))" bottom
+}
+
+dash_init() {
+  DASH_COLS="$(tput cols 2>/dev/null)";  [[ "$DASH_COLS" =~ ^[0-9]+$ ]] || DASH_COLS="${COLUMNS:-80}"
+  DASH_ROWS="$(tput lines 2>/dev/null)"; [[ "$DASH_ROWS" =~ ^[0-9]+$ ]] || DASH_ROWS="${LINES:-24}"
+  local n="${#DESCS[@]}"
+  DASH_BOX_TOP=$(( DASH_ROWS - n - 1 ))   # row of the top border
+  DASH_SR=$(( DASH_BOX_TOP - 1 ))         # bottom of the scrolling region
+  printf '\033[2J\033[H'                  # clean canvas
   tput civis 2>/dev/null || true
-  while kill -0 "$pid" 2>/dev/null; do
-    i=$(( (i + 1) % ${#frames} ))
-    printf '\r\033[K%s %s' "${frames:$i:1}" "$desc"
-    sleep 0.1
-  done
-  wait "$pid"; local rc=$?
+  printf '\033[1;%dr' "$DASH_SR"          # confine scrolling to the area above the box
+  DASH_ACTIVE=1
+  draw_all
+  goto_scroll
+}
+
+dash_cleanup() {
+  [ "${DASH_ACTIVE:-0}" -eq 1 ] || return 0
+  printf '\033[r\033[%d;1H' "$DASH_ROWS"  # release scroll region, park cursor at the last line
   tput cnorm 2>/dev/null || true
+  DASH_ACTIVE=0
+}
+trap dash_cleanup EXIT INT TERM
 
-  # Annotate the line. An explicit ##STATUS##<text> line from the step wins;
-  # otherwise fall back to scanning the output.
-  local note=""
-  local marker; marker="$(grep -m1 '^##STATUS##' "$log" 2>/dev/null | sed 's/^##STATUS##//')"
-  if [ -n "$marker" ]; then
-    note=" ($marker)"
-  elif [ "$rc" -eq 0 ]; then
-    grep -qiE 'already installed|nothing to do'      "$log" && note+=" (already installed)"
-    grep -qE  '^Installed:|successfully installed'   "$log" && note+=" (installed)"
+# Run command from CMDS[$1]; stream its output (minus markers) above the box.
+_run_capture() { # $1=index  $2=statusfile  -> stdout is the verbose stream
+  ( eval "${CMDS[$1]}" ) 2>&1 | while IFS= read -r line; do
+    case "$line" in
+      '##STATUS##'*) printf '%s' "${line#\#\#STATUS\#\#}" >"$2" ;;
+      '##RESTART##') : >"$2.r" ;;
+      *)             printf '%s\n' "$line" ;;
+    esac
+  done
+  return "${PIPESTATUS[0]}"
+}
+
+_status_of() { # $1=rc  $2=statusfile  -> sets REPLY_STATE / REPLY_NOTE
+  local rc="$1" sf="$2" marker=""
+  [ -s "$sf" ] && marker="$(cat "$sf")"
+  REPLY_NOTE=""
+  if [ "$rc" -ne 0 ]; then
+    REPLY_STATE="fail"
+  else
+    case "$marker" in already*) REPLY_STATE="already";; *) REPLY_STATE="ok";; esac
+    [ -n "$marker" ] && REPLY_NOTE="($marker)"
   fi
-  grep -q '^##RESTART##' "$log" && note+=" (reboot required)"
+  [ -f "$sf.r" ] && REPLY_NOTE="${REPLY_NOTE:+$REPLY_NOTE }(reboot required)"
+}
 
-  local cols; cols="$(tput cols 2>/dev/null)"
-  [[ "$cols" =~ ^[0-9]+$ ]] || cols="${COLUMNS:-80}"
-  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
-  local emoji="✅"; [ "$rc" -eq 0 ] || emoji="❌"
-  if [ "$rc" -eq 0 ]; then case "$marker" in already*) emoji="☑️" ;; esac; fi
-  local pad=$(( cols - ${#desc} - ${#note} - 4 )); [ "$pad" -lt 1 ] && pad=1
-  local dots; dots="$(printf '%*s' "$pad" '' | tr ' ' '.')"
-  local note_disp=""; [ -n "$note" ] && note_disp="${C_DIM}${note}${C_RESET}"
+run_step() { # dashboard mode; $1=index
+  local i="$1" sf; sf="$(mktemp)"
+  STATE[i]="run"; draw_item "$i"; goto_scroll
+  _run_capture "$i" "$sf"   # verbose prints straight into the scroll region
+  local rc=$?
+  _status_of "$rc" "$sf"
+  STATE[i]="$REPLY_STATE"; NOTE[i]="$REPLY_NOTE"
+  draw_item "$i"; goto_scroll
+  rm -f "$sf" "$sf.r"
+  return "$rc"
+}
 
-  printf '\r\033[K%s %s%s %s\n' "$desc" "$dots" "$note_disp" "$emoji"
-  [ "$rc" -eq 0 ] || grep -vE '^##(STATUS|RESTART)##' "$log" | sed 's/^/    /'
-  rm -f "$log"
+run_step_plain() { # fallback (no TTY / tiny terminal); $1=index
+  local i="$1" sf; sf="$(mktemp)"
+  printf '%s──\n' "${DESCS[i]}"
+  _run_capture "$i" "$sf" | sed 's/^/    /'
+  local rc=${PIPESTATUS[0]}
+  _status_of "$rc" "$sf"
+  local icon="✅"; case "$REPLY_STATE" in already) icon="☑️";; fail) icon="❌";; esac
+  printf '%s %s%s %s\n' "${DESCS[i]}" "${C_DIM}" "${REPLY_NOTE}${C_RESET}" "$icon"
+  rm -f "$sf" "$sf.r"
   return "$rc"
 }
 
@@ -230,27 +291,46 @@ enable_ssh() {
   echo "##STATUS##successfully configured"
 }
 
+# ---- register the items (desc, command) ----
+add_step "Fedora 44 or later"            "check_fedora"
+add_step "AMD CPU"                       "check_amd"
+add_step "Upgrade system packages"       "upgrade_system"
+add_step "Enable OpenSSH + open firewall" "enable_ssh"
+add_step "Enable KRDP remote desktop"    "enable_krdp"
+add_step "Virtual display (vkms)"        "enable_vkms"
+add_step "Install fastfetch"             "install_pkg fastfetch"
+add_step "Install Google Chrome"         "install_chrome"
+add_step "Set Chrome as default browser" "set_default_browser"
+add_step "Install sshpass"               "install_pkg sshpass"
+add_step "Install expect"                "install_pkg expect"
+add_step "Install cups"                  "install_pkg cups"
+add_step "Install arping"                "install_pkg arping"
+add_step "Install net-tools"             "install_pkg net-tools"
+add_step "Install iperf3"                "install_pkg iperf3"
+add_step "Conda + venv environment"      "setup_conda"
+
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
-while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done &
+( while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done ) &
 
-echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
+# Use the dashboard only on a real terminal that's tall enough; else plain output.
+N="${#DESCS[@]}"; USE_DASH=0
+if [ -t 1 ]; then
+  R="$(tput lines 2>/dev/null)"; [[ "$R" =~ ^[0-9]+$ ]] || R="${LINES:-0}"
+  [ "$R" -ge $(( N + 6 )) ] && USE_DASH=1
+fi
 
-run_step "Fedora 44 or later"     check_fedora || exit 1
-run_step "AMD CPU"                check_amd    || exit 1
-run_step "Upgrade system packages" upgrade_system
-run_step "Enable OpenSSH + open firewall" enable_ssh
-run_step "Enable KRDP remote desktop"     enable_krdp
-run_step "Virtual display (vkms)"         enable_vkms
-run_step "Install fastfetch"              install_pkg fastfetch
-run_step "Install Google Chrome"          install_chrome
-run_step "Set Chrome as default browser"  set_default_browser
-run_step "Install sshpass"                install_pkg sshpass
-run_step "Install expect"                 install_pkg expect
-run_step "Install cups"                   install_pkg cups
-run_step "Install arping"                 install_pkg arping
-run_step "Install net-tools"              install_pkg net-tools
-run_step "Install iperf3"                 install_pkg iperf3
-run_step "Conda + venv environment"       setup_conda
-
-echo "${C_GREEN}Done.${C_RESET}"
+if [ "$USE_DASH" -eq 1 ]; then
+  dash_init
+  for i in "${!DESCS[@]}"; do
+    run_step "$i" || { [ "$i" -le 1 ] && break; }   # abort only if Fedora/AMD checks fail
+  done
+  dash_cleanup
+  printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
+else
+  echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
+  for i in "${!DESCS[@]}"; do
+    run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
+  done
+  printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
+fi
