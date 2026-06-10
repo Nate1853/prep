@@ -173,11 +173,22 @@ check_fedora() {
 
 check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
-  local memkb gib
-  memkb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
-  gib=$(( (memkb + 524288) / 1048576 ))   # round kB to nearest GiB
-  [ "$gib" -ge 8 ] || { echo "Only ${gib} GiB RAM detected (need 8 GB+)"; return 1; }
-  echo "AMD CPU, ${gib} GiB RAM"
+  # Physical installed RAM via DMI (counts memory reserved for the iGPU, unlike MemTotal).
+  local mb=0 gib
+  if command -v dmidecode >/dev/null 2>&1; then
+    mb="$(sudo dmidecode -t 17 2>/dev/null | awk '
+      /^[[:space:]]*Size:/ && $2 ~ /^[0-9]+$/ { if ($3=="GB") s+=$2*1024; else if ($3=="MB") s+=$2 }
+      END { print s+0 }')"
+  fi
+  if [ "${mb:-0}" -gt 0 ]; then
+    gib=$(( (mb + 512) / 1024 ))
+    echo "AMD CPU, ${gib} GB RAM installed"
+  else
+    local memkb; memkb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
+    gib=$(( (memkb + 524288) / 1048576 ))
+    echo "AMD CPU, ${gib} GiB RAM usable (DMI unavailable)"
+  fi
+  [ "$gib" -ge 8 ] || { echo "Only ${gib} GB RAM (need 8 GB+)"; return 1; }
 }
 
 upgrade_system() {
