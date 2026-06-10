@@ -31,15 +31,25 @@ run_step() {
   wait "$pid"; local rc=$?
   tput cnorm 2>/dev/null || true
 
-  local cols; cols="$(tput cols 2>/dev/null || echo 80)"
-  local pad=$(( cols - ${#desc} - 3 )); [ "$pad" -lt 1 ] && pad=1
-  local dots; dots="$(printf '%*s' "$pad" '' | tr ' ' '.')"
+  # Read the command's output and annotate the line accordingly.
+  local note=""
   if [ "$rc" -eq 0 ]; then
-    printf '\r\033[K%s %s✅\n' "$desc" "$dots"
-  else
-    printf '\r\033[K%s %s❌\n' "$desc" "$dots"
-    sed 's/^/    /' "$log"
+    grep -qiE 'already installed|nothing to do'      "$log" && note+=" (already installed)"
+    grep -qiE 'already (configured|enabled)'         "$log" && note+=" (configured)"
+    grep -qE  '^Installed:|successfully installed'   "$log" && note+=" (installed)"
+    grep -qiE 'reboot|restart'                       "$log" && note+=" (requires restart)"
   fi
+
+  local cols; cols="$(tput cols 2>/dev/null)"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols="${COLUMNS:-80}"
+  [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
+  local emoji="✅"; [ "$rc" -eq 0 ] || emoji="❌"
+  local pad=$(( cols - ${#desc} - ${#note} - 4 )); [ "$pad" -lt 1 ] && pad=1
+  local dots; dots="$(printf '%*s' "$pad" '' | tr ' ' '.')"
+  local note_disp=""; [ -n "$note" ] && note_disp="${C_DIM}${note}${C_RESET}"
+
+  printf '\r\033[K%s %s%s %s\n' "$desc" "$dots" "$note_disp" "$emoji"
+  [ "$rc" -eq 0 ] || sed 's/^/    /' "$log"
   rm -f "$log"
   return "$rc"
 }
@@ -53,6 +63,11 @@ check_fedora() {
 
 check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
+}
+
+enable_vkms() {
+  sudo modprobe vkms || return 1
+  echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
 }
 
 enable_krdp() {
@@ -100,5 +115,6 @@ run_step "AMD CPU"                check_amd    || exit 1
 run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
 run_step "Enable OpenSSH + open firewall" enable_ssh
 run_step "Enable KRDP remote desktop"     enable_krdp
+run_step "Virtual display (vkms)"         enable_vkms
 
 echo "${C_GREEN}Done.${C_RESET}"
