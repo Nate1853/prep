@@ -16,14 +16,23 @@ fi
 # A banner printed into the verbose stream so each item's output is identifiable.
 banner() { printf '\n%s━━━━━━━━━━ %s ━━━━━━━━━━%s\n' "$C_HDR" "$1" "$C_RESET"; }
 
-# Closing line: if the caller's shell is already in venv (inherited env var),
-# say it's ready; otherwise tell them how to enter it.
-final_tip() {
-  if [ "${CONDA_DEFAULT_ENV:-}" = "venv" ]; then
-    printf '%svenv active — ready to go.%s\n' "$C_GREEN" "$C_RESET"
-  else
-    printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
+# Closing checklist. Skips steps that are already done.
+next_steps() {
+  printf '\n%sNext steps:%s\n' "$C_HDR" "$C_RESET"
+  if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
+    printf '\n%sactivate venv:%s\n' "$C_DIM" "$C_RESET"
+    printf '  conda activate venv\n'
   fi
+  if [ ! -d "$HOME/Documents/Applications/refurbishment-ui-bolt" ]; then
+    printf '\n%sget the project (run when ready):%s\n' "$C_DIM" "$C_RESET"
+    printf '  cd ~/Documents/Applications\n'
+    printf '  git clone https://github.com/ubiquiti/refurbishment-ui-bolt.git\n'
+    printf '  cd refurbishment-ui-bolt/\n'
+  fi
+  printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
+  printf '  pip install -r requirements.txt\n'
+  printf '\n%slaunch app:%s\n' "$C_DIM" "$C_RESET"
+  printf '  streamlit run src/main.py\n'
 }
 
 # ---- dashboard engine: fixed status box at the bottom, verbose scrolls above ----
@@ -257,11 +266,6 @@ setup_appdir() {
   echo "##STATUS##created"
 }
 
-clone_hint() {
-  printf '%sWhen ready, clone the project:%s\n' "$C_HDR" "$C_RESET"
-  printf '  cd ~/Documents/Applications && git clone https://github.com/ubiquiti/refurbishment-ui-bolt.git\n'
-}
-
 set_no_sleep() {
   # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
   # Masking the sleep targets is authoritative: any suspend attempt (logind,
@@ -392,14 +396,12 @@ if [ "$USE_DASH" -eq 1 ]; then
   done
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  final_tip
-  clone_hint
+  next_steps
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
     run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  final_tip
-  clone_hint
+  next_steps
 fi
