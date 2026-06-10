@@ -44,6 +44,17 @@ repeat() { local n="$1" s="$2" o=""; while [ "$n" -gt 0 ]; do o+="$s"; n=$((n - 
 DASH_ACTIVE=0
 goto_scroll() { printf '\033[%d;1H' "$DASH_SR"; }
 
+# Real terminal size. tput is unreliable under `curl | bash`; ask the tty directly.
+get_termsize() {
+  local sz; sz="$(stty size </dev/tty 2>/dev/null)"   # "rows cols"
+  if [[ "$sz" =~ ^[0-9]+\ [0-9]+$ ]]; then
+    DASH_ROWS="${sz% *}"; DASH_COLS="${sz#* }"
+  else
+    DASH_ROWS="$(tput lines 2>/dev/null)"; [[ "$DASH_ROWS" =~ ^[0-9]+$ ]] || DASH_ROWS="${LINES:-24}"
+    DASH_COLS="$(tput cols 2>/dev/null)";  [[ "$DASH_COLS" =~ ^[0-9]+$ ]] || DASH_COLS="${COLUMNS:-80}"
+  fi
+}
+
 draw_border() { # $1=row  $2=top|bottom
   local row="$1" lc rc
   if [ "$2" = top ]; then lc="╭"; rc="╮"; else lc="╰"; rc="╯"; fi
@@ -71,8 +82,7 @@ draw_all() {
 }
 
 dash_init() {
-  DASH_COLS="$(tput cols 2>/dev/null)";  [[ "$DASH_COLS" =~ ^[0-9]+$ ]] || DASH_COLS="${COLUMNS:-80}"
-  DASH_ROWS="$(tput lines 2>/dev/null)"; [[ "$DASH_ROWS" =~ ^[0-9]+$ ]] || DASH_ROWS="${LINES:-24}"
+  get_termsize
   local n="${#DESCS[@]}"
   DASH_BOX_TOP=$(( DASH_ROWS - n - 1 ))   # row of the top border
   DASH_SR=$(( DASH_BOX_TOP - 1 ))         # bottom of the scrolling region
@@ -400,8 +410,8 @@ sudo -v
 # Use the dashboard only on a real terminal that's tall enough; else plain output.
 N="${#DESCS[@]}"; USE_DASH=0
 if [ -t 1 ]; then
-  R="$(tput lines 2>/dev/null)"; [[ "$R" =~ ^[0-9]+$ ]] || R="${LINES:-24}"
-  [ "$R" -ge $(( N + 4 )) ] && USE_DASH=1   # box is N+2 rows; need a couple rows to scroll
+  get_termsize
+  [ "$DASH_ROWS" -ge $(( N + 4 )) ] && USE_DASH=1   # box is N+2 rows; need a couple rows to scroll
 fi
 
 if [ "$USE_DASH" -eq 1 ]; then
