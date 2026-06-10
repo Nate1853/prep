@@ -31,14 +31,17 @@ run_step() {
   wait "$pid"; local rc=$?
   tput cnorm 2>/dev/null || true
 
-  # Read the command's output and annotate the line accordingly.
+  # Annotate the line. An explicit ##STATUS##<text> line from the step wins;
+  # otherwise fall back to scanning the output.
   local note=""
-  if [ "$rc" -eq 0 ]; then
+  local marker; marker="$(grep -m1 '^##STATUS##' "$log" 2>/dev/null | sed 's/^##STATUS##//')"
+  if [ -n "$marker" ]; then
+    note=" ($marker)"
+  elif [ "$rc" -eq 0 ]; then
     grep -qiE 'already installed|nothing to do'      "$log" && note+=" (already installed)"
-    grep -qiE 'already (configured|enabled)'         "$log" && note+=" (configured)"
     grep -qE  '^Installed:|successfully installed'   "$log" && note+=" (installed)"
-    grep -qiE 'reboot|restart'                       "$log" && note+=" (requires restart)"
   fi
+  grep -qiE 'reboot|restart' "$log" && note+=" (requires restart)"
 
   local cols; cols="$(tput cols 2>/dev/null)"
   [[ "$cols" =~ ^[0-9]+$ ]] || cols="${COLUMNS:-80}"
@@ -49,7 +52,7 @@ run_step() {
   local note_disp=""; [ -n "$note" ] && note_disp="${C_DIM}${note}${C_RESET}"
 
   printf '\r\033[K%s %s%s %s\n' "$desc" "$dots" "$note_disp" "$emoji"
-  [ "$rc" -eq 0 ] || sed 's/^/    /' "$log"
+  [ "$rc" -eq 0 ] || grep -v '^##STATUS##' "$log" | sed 's/^/    /'
   rm -f "$log"
   return "$rc"
 }
@@ -66,16 +69,34 @@ check_amd() {
 }
 
 enable_vkms() {
+  if lsmod | grep -q '^vkms ' && grep -qxs vkms /etc/modules-load.d/vkms.conf; then
+    echo "##STATUS##already configured"; return 0
+  fi
   sudo modprobe vkms || return 1
   echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
+  echo "##STATUS##successfully configured"
 }
 
 enable_krdp() {
   # Runs as the CURRENT user (krdp is a per-user service), sudo only for pkg/firewall.
-  rpm -q krdp-server >/dev/null 2>&1 || sudo dnf install -y krdp-server || return 1
-
   local krdp_dir="$HOME/.local/share/krdp"
   local crt="$krdp_dir/server.crt" key="$krdp_dir/server.key"
+
+  # Already fully set up?
+  local fw_ok=1
+  if systemctl is-active --quiet firewalld; then
+    sudo firewall-cmd --query-port=3389/tcp >/dev/null 2>&1 || fw_ok=0
+  fi
+  if rpm -q krdp-server >/dev/null 2>&1 \
+     && [ -f "$crt" ] && [ -f "$key" ] \
+     && [ "$(kreadconfig6 --file krdpserverrc --group General --key SystemUserEnabled)" = "true" ] \
+     && [ "$(kreadconfig6 --file krdpserverrc --group General --key Autostart)" = "true" ] \
+     && systemctl --user is-active --quiet app-org.kde.krdpserver.service \
+     && [ "$fw_ok" -eq 1 ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+
+  rpm -q krdp-server >/dev/null 2>&1 || sudo dnf install -y krdp-server || return 1
   mkdir -p "$krdp_dir"
   if [ ! -f "$crt" ] || [ ! -f "$key" ]; then
     openssl req -nodes -new -x509 -keyout "$key" -out "$crt" -days 3650 -batch || return 1
@@ -92,9 +113,23 @@ enable_krdp() {
     sudo firewall-cmd --permanent --add-port=3389/tcp || return 1
     sudo firewall-cmd --reload || return 1
   fi
+  echo "##STATUS##successfully configured"
 }
 
 enable_ssh() {
+  # Already fully set up?
+  local fw_ok=1
+  if systemctl is-active --quiet firewalld; then
+    { sudo firewall-cmd --query-service=ssh >/dev/null 2>&1 \
+      && sudo firewall-cmd --query-port=21/tcp >/dev/null 2>&1; } || fw_ok=0
+  fi
+  if rpm -q openssh-server >/dev/null 2>&1 \
+     && systemctl is-enabled --quiet sshd \
+     && systemctl is-active --quiet sshd \
+     && [ "$fw_ok" -eq 1 ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+
   rpm -q openssh-server >/dev/null 2>&1 || sudo dnf install -y openssh-server || return 1
   sudo systemctl enable --now sshd || return 1
   if systemctl is-active --quiet firewalld; then
@@ -102,6 +137,7 @@ enable_ssh() {
     sudo firewall-cmd --permanent --add-port=21/tcp || return 1
     sudo firewall-cmd --reload || return 1
   fi
+  echo "##STATUS##successfully configured"
 }
 
 # ---- ask for sudo once, keep it alive until the script exits ----
