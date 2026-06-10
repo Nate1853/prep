@@ -68,6 +68,20 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
+install_tools() {
+  local pkgs=(sshpass expect cups arping net-tools iperf3)
+  local missing=()
+  local p
+  for p in "${pkgs[@]}"; do
+    rpm -q "$p" >/dev/null 2>&1 || missing+=("$p")
+  done
+  if [ "${#missing[@]}" -eq 0 ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+  sudo dnf install -y "${missing[@]}" || return 1
+  echo "##STATUS##successfully configured"
+}
+
 install_fastfetch() {
   if rpm -q fastfetch >/dev/null 2>&1; then
     echo "##STATUS##already configured"; return 0
@@ -178,5 +192,6 @@ run_step "Enable KRDP remote desktop"     enable_krdp
 run_step "Virtual display (vkms)"         enable_vkms
 run_step "Install fastfetch"              install_fastfetch
 run_step "Install Google Chrome"          install_chrome
+run_step "Install CLI tools"              install_tools
 
 echo "${C_GREEN}Done.${C_RESET}"
