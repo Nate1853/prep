@@ -53,6 +53,12 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
+open_port_21() {
+  systemctl is-active --quiet firewalld || { echo "firewalld is not running"; return 1; }
+  sudo firewall-cmd --permanent --add-port=21/tcp || return 1
+  sudo firewall-cmd --reload || return 1
+}
+
 enable_ssh() {
   rpm -q openssh-server >/dev/null 2>&1 || sudo dnf install -y openssh-server || return 1
   sudo systemctl enable --now sshd || return 1
@@ -72,5 +78,6 @@ run_step "Fedora 44 or later"     check_fedora || exit 1
 run_step "AMD CPU"                check_amd    || exit 1
 run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
 run_step "Enable OpenSSH server"   enable_ssh
+run_step "Open firewall port 21"   open_port_21
 
 echo "${C_GREEN}Done.${C_RESET}"
