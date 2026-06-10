@@ -346,9 +346,27 @@ enable_vkms() {
   if [ "$loaded" -eq 1 ] && [ "$conf" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
-  [ "$loaded" -eq 1 ] || sudo modprobe vkms || return 1
-  [ "$conf" -eq 1 ]   || echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
-  echo "##STATUS##successfully configured"
+
+  # Set autoload first so a reboot loads it even if loading now misbehaves.
+  [ "$conf" -eq 1 ] || echo "vkms" | sudo tee /etc/modules-load.d/vkms.conf >/dev/null || return 1
+
+  # Load now, with retries — modprobe can transiently segfault on a fresh boot.
+  # Trust /sys/module/vkms, not modprobe's exit code.
+  if [ "$loaded" -ne 1 ]; then
+    local i
+    for i in 1 2 3; do
+      sudo modprobe vkms 2>&1 || true
+      [ -d /sys/module/vkms ] && { loaded=1; break; }
+      sleep 1
+    done
+  fi
+
+  if [ "$loaded" -eq 1 ]; then
+    echo "##STATUS##successfully configured"
+  else
+    echo "could not load vkms now; it will load on next boot via /etc/modules-load.d/vkms.conf"
+    echo "##STATUS##configured, loads on reboot"
+  fi
 }
 
 krdp_portal_grant() {
