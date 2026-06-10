@@ -53,6 +53,29 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
+enable_krdp() {
+  # Runs as the CURRENT user (krdp is a per-user service), sudo only for pkg/firewall.
+  rpm -q krdp-server >/dev/null 2>&1 || sudo dnf install -y krdp-server || return 1
+
+  local krdp_dir="$HOME/.local/share/krdp"
+  local crt="$krdp_dir/server.crt" key="$krdp_dir/server.key"
+  mkdir -p "$krdp_dir"
+  if [ ! -f "$crt" ] || [ ! -f "$key" ]; then
+    openssl req -nodes -new -x509 -keyout "$key" -out "$crt" -days 3650 -batch || return 1
+  fi
+
+  kwriteconfig6 --file krdpserverrc --group General --key Certificate "$crt" || return 1
+  kwriteconfig6 --file krdpserverrc --group General --key CertificateKey "$key" || return 1
+  kwriteconfig6 --file krdpserverrc --group General --key SystemUserEnabled true || return 1
+
+  systemctl --user enable --now app-org.kde.krdpserver.service || return 1
+
+  if systemctl is-active --quiet firewalld; then
+    sudo firewall-cmd --permanent --add-port=3389/tcp || return 1
+    sudo firewall-cmd --reload || return 1
+  fi
+}
+
 enable_ssh() {
   rpm -q openssh-server >/dev/null 2>&1 || sudo dnf install -y openssh-server || return 1
   sudo systemctl enable --now sshd || return 1
@@ -73,5 +96,6 @@ run_step "Fedora 44 or later"     check_fedora || exit 1
 run_step "AMD CPU"                check_amd    || exit 1
 run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
 run_step "Enable OpenSSH + open firewall" enable_ssh
+run_step "Enable KRDP remote desktop"     enable_krdp
 
 echo "${C_GREEN}Done.${C_RESET}"
