@@ -250,15 +250,20 @@ set_default_browser() {
 
 set_no_sleep() {
   # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
+  # Masking the sleep targets is authoritative: any suspend attempt (logind,
+  # PowerDevil, manual) goes through systemd and is refused.
   local targets="sleep.target suspend.target hibernate.target hybrid-sleep.target"
-  local all_masked=1 t
+  local ld=/etc/systemd/logind.conf.d/10-no-idle.conf
+  local masked=1 t
   for t in $targets; do
-    [ "$(systemctl is-enabled "$t" 2>/dev/null)" = "masked" ] || all_masked=0
+    [ "$(systemctl is-enabled "$t" 2>/dev/null)" = "masked" ] || masked=0
   done
-  if [ "$all_masked" -eq 1 ]; then
+  if [ "$masked" -eq 1 ] && [ -f "$ld" ]; then
     echo "##STATUS##already configured"; return 0
   fi
   sudo systemctl mask $targets || return 1
+  sudo mkdir -p /etc/systemd/logind.conf.d || return 1
+  printf '[Login]\nIdleAction=ignore\n' | sudo tee "$ld" >/dev/null || return 1
   echo "##STATUS##successfully configured"
 }
 
@@ -351,7 +356,7 @@ add_step "Install cups"                  "install_pkg cups"
 add_step "Install arping"                "install_pkg arping"
 add_step "Install net-tools"             "install_pkg net-tools"
 add_step "Install iperf3"                "install_pkg iperf3"
-add_step "Conda + venv environment"      "setup_conda"
+add_step "Conda + venv (python 3.12.11)" "setup_conda"
 add_step "Activate venv on login"        "activate_venv"
 
 # ---- ask for sudo once, keep it alive until the script exits ----
