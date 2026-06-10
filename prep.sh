@@ -385,8 +385,8 @@ sudo -v
 # Use the dashboard only on a real terminal that's tall enough; else plain output.
 N="${#DESCS[@]}"; USE_DASH=0
 if [ -t 1 ]; then
-  R="$(tput lines 2>/dev/null)"; [[ "$R" =~ ^[0-9]+$ ]] || R="${LINES:-0}"
-  [ "$R" -ge $(( N + 6 )) ] && USE_DASH=1
+  R="$(tput lines 2>/dev/null)"; [[ "$R" =~ ^[0-9]+$ ]] || R="${LINES:-24}"
+  [ "$R" -ge $(( N + 4 )) ] && USE_DASH=1   # box is N+2 rows; need a couple rows to scroll
 fi
 
 if [ "$USE_DASH" -eq 1 ]; then
