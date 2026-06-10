@@ -53,6 +53,15 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
+enable_ssh() {
+  rpm -q openssh-server >/dev/null 2>&1 || sudo dnf install -y openssh-server || return 1
+  sudo systemctl enable --now sshd || return 1
+  if systemctl is-active --quiet firewalld; then
+    sudo firewall-cmd --permanent --add-service=ssh
+    sudo firewall-cmd --reload
+  fi
+}
+
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
 while true; do sudo -n true; sleep 60; kill -0 "$$" 2>/dev/null || exit; done &
@@ -62,5 +71,6 @@ echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
 run_step "Fedora 44 or later"     check_fedora || exit 1
 run_step "AMD CPU"                check_amd    || exit 1
 run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
+run_step "Enable OpenSSH server"   enable_ssh
 
 echo "${C_GREEN}Done.${C_RESET}"
