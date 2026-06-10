@@ -268,20 +268,35 @@ setup_appdir() {
 
 set_no_sleep() {
   # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
-  # Masking the sleep targets is authoritative: any suspend attempt (logind,
-  # PowerDevil, manual) goes through systemd and is refused.
+  # Three layers: mask sleep targets (authoritative — any suspend is refused),
+  # logind IdleAction=ignore, and set KDE PowerDevil "When inactive -> Do nothing".
   local targets="sleep.target suspend.target hibernate.target hybrid-sleep.target"
   local ld=/etc/systemd/logind.conf.d/10-no-idle.conf
-  local masked=1 t
+  local pdf=powermanagementprofilesrc
+  local masked=1 pd_done=1 t p
+
   for t in $targets; do
     [ "$(systemctl is-enabled "$t" 2>/dev/null)" = "masked" ] || masked=0
   done
-  if [ "$masked" -eq 1 ] && [ -f "$ld" ]; then
+  for p in AC Battery LowBattery; do
+    [ -z "$(kreadconfig6 --file "$pdf" --group "$p" --group SuspendSession --key suspendType 2>/dev/null)" ] || pd_done=0
+  done
+  if [ "$masked" -eq 1 ] && [ -f "$ld" ] && [ "$pd_done" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
+
   sudo systemctl mask $targets || return 1
   sudo mkdir -p /etc/systemd/logind.conf.d || return 1
   printf '[Login]\nIdleAction=ignore\n' | sudo tee "$ld" >/dev/null || return 1
+
+  # PowerDevil: remove the SuspendSession action from each profile = "Do nothing".
+  for p in AC Battery LowBattery; do
+    kwriteconfig6 --file "$pdf" --group "$p" --group SuspendSession --key idleTime    --delete 2>/dev/null
+    kwriteconfig6 --file "$pdf" --group "$p" --group SuspendSession --key suspendType --delete 2>/dev/null
+  done
+  qdbus  org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement reparseConfiguration 2>/dev/null \
+    || qdbus6 org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement reparseConfiguration 2>/dev/null || true
+
   echo "##STATUS##successfully configured"
 }
 
