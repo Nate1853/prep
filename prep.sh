@@ -31,10 +31,11 @@ run_step() {
   wait "$pid"; local rc=$?
   tput cnorm 2>/dev/null || true
 
+  local cols; cols="$(tput cols 2>/dev/null || echo 80)"
   if [ "$rc" -eq 0 ]; then
-    printf '\r\033[K%s ✅\n' "$desc"
+    printf '\r\033[K%s\033[%dG✅\n' "$desc" "$((cols - 1))"
   else
-    printf '\r\033[K%s ❌\n' "$desc"
+    printf '\r\033[K%s\033[%dG❌\n' "$desc" "$((cols - 1))"
     sed 's/^/    /' "$log"
   fi
   rm -f "$log"
