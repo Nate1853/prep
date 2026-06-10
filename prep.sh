@@ -347,10 +347,12 @@ if [ "$USE_DASH" -eq 1 ]; then
   done
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
+  printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
     run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
+  printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
 fi
