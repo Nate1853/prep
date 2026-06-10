@@ -95,6 +95,45 @@ EOF
   echo "##STATUS##successfully installed"
 }
 
+setup_conda() {
+  local changed=0
+  local conda="$HOME/miniconda3/bin/conda"
+  local me; me="$(whoami)"
+
+  # 1. sudoers drop-ins (Fedora: dnf instead of apt/dpkg/debconf)
+  _sudoers() {  # $1=filename  $2=content
+    local f="/etc/sudoers.d/$1"
+    if [ "$(sudo cat "$f" 2>/dev/null)" != "$2" ]; then
+      echo "$2" | sudo tee "$f" >/dev/null || return 1
+      changed=1
+    fi
+  }
+  _sudoers uibolt-nic "$me ALL=(ALL) NOPASSWD: /usr/bin/rm, /usr/sbin/ip, /usr/bin/tee, /usr/bin/udevadm, /usr/bin/systemctl, /usr/bin/networkctl, /usr/sbin/arping" || return 1
+  _sudoers uibolt-dnf "$me ALL=(ALL) SETENV: NOPASSWD: /usr/bin/dnf, /usr/bin/rpm" || return 1
+  _sudoers uibolt-uos "$me ALL=(ALL) NOPASSWD: /tmp/unifi-os-server-installer, /usr/sbin/usermod" || return 1
+  sudo visudo -c >/dev/null || return 1
+
+  # 2. Miniconda (batch, non-interactive; -u tolerates an existing dir)
+  if [ ! -x "$conda" ]; then
+    curl -fsSL https://repo.anaconda.com/miniconda/Miniconda3-latest-Linux-x86_64.sh -o /tmp/miniconda.sh || return 1
+    bash /tmp/miniconda.sh -b -u -p "$HOME/miniconda3" || return 1
+    changed=1
+  fi
+
+  # 3. conda init + accept ToS (all idempotent)
+  "$conda" init bash || return 1
+  "$conda" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/main || return 1
+  "$conda" tos accept --override-channels --channel https://repo.anaconda.com/pkgs/r    || return 1
+
+  # 4. Create the 'venv' environment if it doesn't exist
+  if ! "$conda" env list | awk '{print $1}' | grep -qx venv; then
+    "$conda" create -n venv python=3.12.11 -y || return 1
+    changed=1
+  fi
+
+  [ "$changed" -eq 1 ] && echo "##STATUS##successfully configured" || echo "##STATUS##already configured"
+}
+
 set_default_browser() {
   local target="google-chrome.desktop"
   if [ "$(xdg-settings get default-web-browser 2>/dev/null)" = "$target" ]; then
@@ -197,5 +236,6 @@ run_step "Install cups"                   install_pkg cups
 run_step "Install arping"                 install_pkg arping
 run_step "Install net-tools"              install_pkg net-tools
 run_step "Install iperf3"                 install_pkg iperf3
+run_step "Conda + venv environment"       setup_conda
 
 echo "${C_GREEN}Done.${C_RESET}"
