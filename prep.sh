@@ -351,10 +351,26 @@ enable_vkms() {
   echo "##STATUS##successfully configured"
 }
 
+krdp_portal_grant() {
+  # Pre-authorize the RemoteDesktop portal so KWin never shows the consent dialog
+  # (xdg-desktop-portal-kde checks table "kde-authorized" / id "remote-desktop").
+  # krdp is a host app; grant its app id and the empty (host) id.
+  local app
+  for app in "org.kde.krdpserver" ""; do
+    gdbus call --session \
+      --dest org.freedesktop.impl.portal.PermissionStore \
+      --object-path /org/freedesktop/impl/portal/PermissionStore \
+      --method org.freedesktop.impl.portal.PermissionStore.SetPermission \
+      kde-authorized true remote-desktop "$app" "['yes']" >/dev/null 2>&1 || true
+  done
+}
+
 enable_krdp() {
   # Runs as the CURRENT user (krdp is a per-user service), sudo only for pkg/firewall.
   local krdp_dir="$HOME/.local/share/krdp"
   local crt="$krdp_dir/server.crt" key="$krdp_dir/server.key"
+
+  krdp_portal_grant   # skip the KWin remote-desktop consent popup
 
   # Already fully set up?
   local fw_ok=1
