@@ -16,6 +16,16 @@ fi
 # A banner printed into the verbose stream so each item's output is identifiable.
 banner() { printf '\n%s━━━━━━━━━━ %s ━━━━━━━━━━%s\n' "$C_HDR" "$1" "$C_RESET"; }
 
+# Closing line: if the caller's shell is already in venv (inherited env var),
+# say it's ready; otherwise tell them how to enter it.
+final_tip() {
+  if [ "${CONDA_DEFAULT_ENV:-}" = "venv" ]; then
+    printf '%svenv active — ready to go.%s\n' "$C_GREEN" "$C_RESET"
+  else
+    printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
+  fi
+}
+
 # ---- dashboard engine: fixed status box at the bottom, verbose scrolls above ----
 DESCS=(); CMDS=(); STATE=(); NOTE=()
 add_step() { DESCS+=("$1"); CMDS+=("$2"); STATE+=("pending"); NOTE+=(""); }
@@ -347,12 +357,12 @@ if [ "$USE_DASH" -eq 1 ]; then
   done
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
+  final_tip
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
     run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  printf '%sTo enter the venv env in this shell now: exec bash%s\n' "$C_DIM" "$C_RESET"
+  final_tip
 fi
