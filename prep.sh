@@ -47,6 +47,7 @@ run_step() {
   [[ "$cols" =~ ^[0-9]+$ ]] || cols="${COLUMNS:-80}"
   [[ "$cols" =~ ^[0-9]+$ ]] || cols=80
   local emoji="✅"; [ "$rc" -eq 0 ] || emoji="❌"
+  if [ "$rc" -eq 0 ]; then case "$marker" in already*) emoji="☑️" ;; esac; fi
   local pad=$(( cols - ${#desc} - ${#note} - 4 )); [ "$pad" -lt 1 ] && pad=1
   local dots; dots="$(printf '%*s' "$pad" '' | tr ' ' '.')"
   local note_disp=""; [ -n "$note" ] && note_disp="${C_DIM}${note}${C_RESET}"
@@ -71,15 +72,15 @@ check_amd() {
 install_pkg() {
   local pkg="$1"
   if rpm -q "$pkg" >/dev/null 2>&1; then
-    echo "##STATUS##already configured"; return 0
+    echo "##STATUS##already installed"; return 0
   fi
   sudo dnf install -y "$pkg" || return 1
-  echo "##STATUS##successfully configured"
+  echo "##STATUS##successfully installed"
 }
 
 install_chrome() {
   if rpm -q google-chrome-stable >/dev/null 2>&1; then
-    echo "##STATUS##already configured"; return 0
+    echo "##STATUS##already installed"; return 0
   fi
   sudo tee /etc/yum.repos.d/google-chrome.repo >/dev/null <<'EOF'
 [google-chrome]
@@ -90,7 +91,7 @@ gpgcheck=1
 gpgkey=https://dl.google.com/linux/linux_signing_key.pub
 EOF
   sudo dnf install -y google-chrome-stable || return 1
-  echo "##STATUS##successfully configured"
+  echo "##STATUS##successfully installed"
 }
 
 enable_vkms() {
