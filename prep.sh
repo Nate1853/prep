@@ -291,11 +291,22 @@ activate_venv() {
 }
 
 set_default_browser() {
-  local target="google-chrome.desktop"
-  if [ "$(xdg-settings get default-web-browser 2>/dev/null)" = "$target" ]; then
+  # xdg-settings/xdg-mime shell out to `qtpaths` (named qtpaths6 on Fedora KDE) and
+  # fail, so write what Plasma actually reads directly: kdeglobals + mimeapps.list.
+  local desktop="google-chrome.desktop"
+  local cur_kde cur_mime
+  cur_kde="$(kreadconfig6 --file kdeglobals --group General --key BrowserApplication 2>/dev/null)"
+  cur_mime="$(kreadconfig6 --file mimeapps.list --group 'Default Applications' --key 'x-scheme-handler/https' 2>/dev/null)"
+  if [ "$cur_kde" = "$desktop" ] && [ "$cur_mime" = "$desktop" ]; then
     echo "##STATUS##already configured"; return 0
   fi
-  xdg-settings set default-web-browser "$target" || return 1
+
+  kwriteconfig6 --file kdeglobals --group General --key BrowserApplication "$desktop" || return 1
+  local k
+  for k in x-scheme-handler/http x-scheme-handler/https text/html x-scheme-handler/about x-scheme-handler/unknown; do
+    kwriteconfig6 --file mimeapps.list --group 'Default Applications' --key "$k" "$desktop" || return 1
+  done
+  xdg-settings set default-web-browser "$desktop" 2>/dev/null || true   # best effort
   echo "##STATUS##successfully configured"
 }
 
