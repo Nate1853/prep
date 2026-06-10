@@ -193,6 +193,8 @@ check_amd() {
 
 upgrade_system() {
   local logf rc; logf="$(mktemp)"
+  # Discover/PackageKit can hold the package lock on a fresh install; release it.
+  sudo systemctl stop packagekit 2>/dev/null || true
   sudo dnf upgrade --refresh -y 2>&1 | tee "$logf"   # stream live AND capture
   rc=${PIPESTATUS[0]}
   if [ "$rc" -ne 0 ]; then rm -f "$logf"; return 1; fi
