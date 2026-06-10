@@ -68,25 +68,12 @@ check_amd() {
   grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
 }
 
-install_tools() {
-  local pkgs=(sshpass expect cups arping net-tools iperf3)
-  local missing=()
-  local p
-  for p in "${pkgs[@]}"; do
-    rpm -q "$p" >/dev/null 2>&1 || missing+=("$p")
-  done
-  if [ "${#missing[@]}" -eq 0 ]; then
+install_pkg() {
+  local pkg="$1"
+  if rpm -q "$pkg" >/dev/null 2>&1; then
     echo "##STATUS##already configured"; return 0
   fi
-  sudo dnf install -y "${missing[@]}" || return 1
-  echo "##STATUS##successfully configured"
-}
-
-install_fastfetch() {
-  if rpm -q fastfetch >/dev/null 2>&1; then
-    echo "##STATUS##already configured"; return 0
-  fi
-  sudo dnf install -y fastfetch || return 1
+  sudo dnf install -y "$pkg" || return 1
   echo "##STATUS##successfully configured"
 }
 
@@ -190,8 +177,13 @@ run_step "Upgrade system packages" sudo dnf upgrade --refresh -y
 run_step "Enable OpenSSH + open firewall" enable_ssh
 run_step "Enable KRDP remote desktop"     enable_krdp
 run_step "Virtual display (vkms)"         enable_vkms
-run_step "Install fastfetch"              install_fastfetch
+run_step "Install fastfetch"              install_pkg fastfetch
 run_step "Install Google Chrome"          install_chrome
-run_step "Install CLI tools"              install_tools
+run_step "Install sshpass"                install_pkg sshpass
+run_step "Install expect"                 install_pkg expect
+run_step "Install cups"                   install_pkg cups
+run_step "Install arping"                 install_pkg arping
+run_step "Install net-tools"              install_pkg net-tools
+run_step "Install iperf3"                 install_pkg iperf3
 
 echo "${C_GREEN}Done.${C_RESET}"
