@@ -189,6 +189,7 @@ check_amd() {
     echo "AMD CPU, ${gib} GiB RAM usable (DMI unavailable)"
   fi
   [ "$gib" -ge 8 ] || { echo "Only ${gib} GB RAM (need 8 GB+)"; return 1; }
+  echo "##STATUS##${gib}GB, min. 8GB"
 }
 
 upgrade_system() {
@@ -435,6 +436,40 @@ enable_krdp() {
   echo "##STATUS##successfully configured"
 }
 
+enable_autologin() {
+  # Boot straight into the KDE (Wayland) session with no SDDM password prompt
+  # AND no KWallet unlock dialog, so a headless (re)boot lands in Plasma and
+  # KRDP autostarts — instead of stalling at a prompt where the per-user krdp
+  # service never runs. Fedora KDE uses SDDM (drop-ins from /etc/sddm.conf.d/).
+  local me; me="$(whoami)"
+  local dir=/etc/sddm.conf.d conf=/etc/sddm.conf.d/10-autologin.conf
+
+  # 1. SDDM autologin into the Wayland Plasma session (KRDP requires Wayland).
+  #    Prefer plasma.desktop; fall back to whatever plasma*.desktop is installed.
+  local sess=plasma.desktop
+  if [ ! -f "/usr/share/wayland-sessions/$sess" ]; then
+    local f; f="$(ls /usr/share/wayland-sessions/plasma*.desktop 2>/dev/null | head -n1)"
+    [ -n "$f" ] && sess="$(basename "$f")"
+  fi
+  local want; want="$(printf '[Autologin]\nUser=%s\nSession=%s\n' "$me" "$sess")"
+
+  # 2. KWallet: disable it outright. Under autologin no login password is typed,
+  #    so kwallet-pam can never auto-unlock — leaving it enabled means an unlock
+  #    dialog blocks the headless session. Disabling kills the prompt for good.
+  local kw_done=0
+  [ "$(kreadconfig6 --file kwalletrc --group Wallet --key Enabled 2>/dev/null)" = "false" ] && kw_done=1
+
+  if [ "$(sudo cat "$conf" 2>/dev/null)" = "$want" ] && [ "$kw_done" -eq 1 ]; then
+    echo "##STATUS##already configured"; return 0
+  fi
+
+  sudo mkdir -p "$dir" || return 1
+  printf '%s\n' "$want" | sudo tee "$conf" >/dev/null || return 1
+  kwriteconfig6 --file kwalletrc --group Wallet --key Enabled false || return 1
+
+  echo "##STATUS##successfully configured"
+}
+
 enable_ssh() {
   # Already fully set up?
   local fw_ok=1
@@ -468,6 +503,7 @@ item amd       "AMD CPU + 8GB+ RAM"             "check_amd"
 item upgrade   "Upgrade system packages"        "upgrade_system"
 item ssh       "Enable OpenSSH + open firewall" "enable_ssh"
 item krdp      "Enable KRDP remote desktop"     "enable_krdp"
+item autologin "Autologin into KDE on boot (+Kwallet fix)" "enable_autologin"
 item vkms      "Virtual display (vkms)"         "enable_vkms"
 item nosleep   "Never sleep when idle"          "set_no_sleep"
 item fastfetch "Install fastfetch"              "install_pkg fastfetch"
@@ -486,10 +522,10 @@ item appdir    "Documents/Applications folder"  "setup_appdir"
 # ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
 # keep fedora+amd first (they gate the run). "nextsteps" is a post-run flag
 # (prints the closing checklist), not a dashboard step.
-PROFILE_full=(fedora amd upgrade ssh krdp vkms nosleep fastfetch chrome browser \
+PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep fastfetch chrome browser \
               sshpass expect cups arping nettools iperf3 conda venvlogin appdir nextsteps)
 PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
-PROFILE_minimal=(fedora amd upgrade ssh krdp vkms nosleep)  # core only, no installs / no next-steps
+PROFILE_minimal=(fedora amd upgrade ssh krdp autologin vkms nosleep)  # core only, no installs / no next-steps
 
 # ---- pick the profile (env PROFILE=… overrides; else prompt; else full) ----
 choose_profile() {
