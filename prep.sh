@@ -24,7 +24,7 @@ next_steps() {
     printf '  exec bash\n'
   fi
   if [ ! -d "$HOME/Documents/Applications/refurbishment-ui-bolt" ]; then
-    printf '\n%sget the project (run when ready):%s\n' "$C_DIM" "$C_RESET"
+    printf '\n%sget the project when ready and when prompted for use your USERNAME(not email) + PAT):%s\n' "$C_DIM" "$C_RESET"
     printf '  cd ~/Documents/Applications\n'
     printf '  git clone https://github.com/ubiquiti/refurbishment-ui-bolt.git\n'
     printf '  cd refurbishment-ui-bolt/\n'
