@@ -484,11 +484,12 @@ item venvlogin "Activate venv on login"         "activate_venv"
 item appdir    "Documents/Applications folder"  "setup_appdir"
 
 # ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
-# keep fedora+amd first (they gate the run).
+# keep fedora+amd first (they gate the run). "nextsteps" is a post-run flag
+# (prints the closing checklist), not a dashboard step.
 PROFILE_full=(fedora amd upgrade ssh krdp vkms nosleep fastfetch chrome browser \
-              sshpass expect cups arping nettools iperf3 conda venvlogin appdir)
+              sshpass expect cups arping nettools iperf3 conda venvlogin appdir nextsteps)
 PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
-PROFILE_minimal=(fedora amd upgrade ssh krdp vkms nosleep)  # core only, no installs
+PROFILE_minimal=(fedora amd upgrade ssh krdp vkms nosleep)  # core only, no installs / no next-steps
 
 # ---- pick the profile (env PROFILE=… overrides; else prompt; else full) ----
 choose_profile() {
@@ -510,7 +511,11 @@ choose_profile() {
 PROFILE_SEL="$(choose_profile)"
 
 eval 'PROFILE_KEYS=("${PROFILE_'"$PROFILE_SEL"'[@]}")'
-for k in "${PROFILE_KEYS[@]}"; do add_step "${ITEM_DESC[$k]}" "${ITEM_CMD[$k]}"; done
+for k in "${PROFILE_KEYS[@]}"; do
+  [ "$k" = nextsteps ] && continue          # post-run flag, not a step
+  add_step "${ITEM_DESC[$k]}" "${ITEM_CMD[$k]}"
+done
+SHOW_NEXTSTEPS=0; case " ${PROFILE_KEYS[*]} " in *" nextsteps "*) SHOW_NEXTSTEPS=1 ;; esac
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
@@ -530,12 +535,12 @@ if [ "$USE_DASH" -eq 1 ]; then
   done
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  next_steps
+  [ "$SHOW_NEXTSTEPS" -eq 1 ] && next_steps
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
     run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  next_steps
+  [ "$SHOW_NEXTSTEPS" -eq 1 ] && next_steps
 fi
