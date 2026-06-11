@@ -440,15 +440,19 @@ enable_krdp() {
 }
 
 enable_autologin() {
-  # Boot straight into the KDE (Wayland) session with no SDDM password prompt
+  # Boot straight into the KDE (Wayland) session with no login password prompt
   # AND no KWallet unlock dialog, so a headless (re)boot lands in Plasma and
   # KRDP autostarts — instead of stalling at a prompt where the per-user krdp
-  # service never runs. Fedora KDE uses SDDM (drop-ins from /etc/sddm.conf.d/).
+  # service never runs.
+  #
+  # Fedora 44+ KDE ships Plasma Login Manager (plasmalogin), an SDDM fork that
+  # uses the SAME [Autologin] format but reads /etc/plasmalogin.conf.d/ — NOT
+  # /etc/sddm.conf.d/. Detect whichever display manager is active and target
+  # its drop-in dir, so the same block works on either.
   local me; me="$(whoami)"
-  local dir=/etc/sddm.conf.d conf=/etc/sddm.conf.d/10-autologin.conf
 
-  # 1. SDDM autologin into the Wayland Plasma session (KRDP requires Wayland).
-  #    Prefer plasma.desktop; fall back to whatever plasma*.desktop is installed.
+  # 1. Wayland Plasma session (KRDP requires Wayland). Prefer plasma.desktop;
+  #    fall back to whatever plasma*.desktop is installed.
   local sess=plasma.desktop
   if [ ! -f "/usr/share/wayland-sessions/$sess" ]; then
     local f; f="$(ls /usr/share/wayland-sessions/plasma*.desktop 2>/dev/null | head -n1)"
@@ -456,11 +460,28 @@ enable_autologin() {
   fi
   local want; want="$(printf '[Autologin]\nUser=%s\nSession=%s\n' "$me" "$sess")"
 
-  # 2. KWallet: disable it outright. Under autologin no login password is typed,
+  # 2. Pick the config dir for the active display manager (SDDM-compatible keys).
+  local dm dir
+  dm="$(systemctl show -p Id --value display-manager.service 2>/dev/null)"
+  case "$dm" in
+    plasmalogin.service) dir=/etc/plasmalogin.conf.d ;;
+    sddm.service)        dir=/etc/sddm.conf.d ;;
+    *) if [ -d /etc/plasmalogin.conf.d ]; then dir=/etc/plasmalogin.conf.d; else dir=/etc/sddm.conf.d; fi ;;
+  esac
+  local conf="$dir/10-autologin.conf"
+  echo "Display manager: ${dm:-unknown} -> $conf"
+
+  # 3. KWallet: disable it outright. Under autologin no login password is typed,
   #    so kwallet-pam can never auto-unlock — leaving it enabled means an unlock
   #    dialog blocks the headless session. Disabling kills the prompt for good.
   local kw_done=0
   [ "$(kreadconfig6 --file kwalletrc --group Wallet --key Enabled 2>/dev/null)" = "false" ] && kw_done=1
+
+  # Drop any stale SDDM drop-in we may have written on a prior run with the
+  # wrong DM, unless SDDM is the one actually in use.
+  if [ "$dir" != /etc/sddm.conf.d ] && [ -f /etc/sddm.conf.d/10-autologin.conf ]; then
+    sudo rm -f /etc/sddm.conf.d/10-autologin.conf || true
+  fi
 
   if [ "$(sudo cat "$conf" 2>/dev/null)" = "$want" ] && [ "$kw_done" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
