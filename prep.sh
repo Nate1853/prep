@@ -59,7 +59,7 @@ draw_border() { # $1=row  $2=top|bottom
   local row="$1" lc rc
   if [ "$2" = top ]; then lc="╭"; rc="╮"; else lc="╰"; rc="╯"; fi
   printf '\033[%d;1H\033[K%s%s%s' "$row" "$lc" "$(repeat $((DASH_COLS - 2)) '─')" "$rc"
-  [ "$2" = top ] && printf '\033[%d;3H┤ %sFedora prep%s ├' "$row" "$C_GREEN" "$C_RESET"
+  [ "$2" = top ] && printf '\033[%d;3H┤ %sFedora prep — %s%s ├' "$row" "$C_GREEN" "${PROFILE_SEL:-full}" "$C_RESET"
 }
 
 draw_item() { # $1=index
@@ -459,26 +459,58 @@ enable_ssh() {
   echo "##STATUS##successfully configured"
 }
 
-# ---- register the items (desc, command) ----
-add_step "Fedora 44+ (KDE, Wayland)"     "check_fedora"
-add_step "AMD CPU + 8GB+ RAM"            "check_amd"
-add_step "Upgrade system packages"       "upgrade_system"
-add_step "Enable OpenSSH + open firewall" "enable_ssh"
-add_step "Enable KRDP remote desktop"    "enable_krdp"
-add_step "Virtual display (vkms)"        "enable_vkms"
-add_step "Never sleep when idle"         "set_no_sleep"
-add_step "Install fastfetch"             "install_pkg fastfetch"
-add_step "Install Google Chrome"         "install_chrome"
-add_step "Set Chrome as default browser" "set_default_browser"
-add_step "Install sshpass"               "install_pkg sshpass"
-add_step "Install expect"                "install_pkg expect"
-add_step "Install cups"                  "install_pkg cups"
-add_step "Install arping"                "install_pkg arping"
-add_step "Install net-tools"             "install_pkg net-tools"
-add_step "Install iperf3"                "install_pkg iperf3"
-add_step "Conda + venv (python 3.12.11)" "setup_conda"
-add_step "Activate venv on login"        "activate_venv"
-add_step "Documents/Applications folder" "setup_appdir"
+# ---- item catalog: key -> (description, command). Declare each item once. ----
+declare -A ITEM_DESC ITEM_CMD
+item() { ITEM_DESC[$1]="$2"; ITEM_CMD[$1]="$3"; }
+
+item fedora    "Fedora 44+ (KDE, Wayland)"      "check_fedora"
+item amd       "AMD CPU + 8GB+ RAM"             "check_amd"
+item upgrade   "Upgrade system packages"        "upgrade_system"
+item ssh       "Enable OpenSSH + open firewall" "enable_ssh"
+item krdp      "Enable KRDP remote desktop"     "enable_krdp"
+item vkms      "Virtual display (vkms)"         "enable_vkms"
+item nosleep   "Never sleep when idle"          "set_no_sleep"
+item fastfetch "Install fastfetch"              "install_pkg fastfetch"
+item chrome    "Install Google Chrome"          "install_chrome"
+item browser   "Set Chrome as default browser"  "set_default_browser"
+item sshpass   "Install sshpass"                "install_pkg sshpass"
+item expect    "Install expect"                 "install_pkg expect"
+item cups      "Install cups"                   "install_pkg cups"
+item arping    "Install arping"                 "install_pkg arping"
+item nettools  "Install net-tools"              "install_pkg net-tools"
+item iperf3    "Install iperf3"                 "install_pkg iperf3"
+item conda     "Conda + venv (python 3.12.11)"  "setup_conda"
+item venvlogin "Activate venv on login"         "activate_venv"
+item appdir    "Documents/Applications folder"  "setup_appdir"
+
+# ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
+# keep fedora+amd first (they gate the run).
+PROFILE_full=(fedora amd upgrade ssh krdp vkms nosleep fastfetch chrome browser \
+              sshpass expect cups arping nettools iperf3 conda venvlogin appdir)
+PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
+PROFILE_minimal=(fedora amd upgrade ssh krdp vkms nosleep)  # core only, no installs
+
+# ---- pick the profile (env PROFILE=… overrides; else prompt; else full) ----
+choose_profile() {
+  local p="${PROFILE:-}"
+  if [ -z "$p" ] && [ -e /dev/tty ]; then
+    {
+      printf '\nSelect install profile:\n'
+      printf '  1) full     — everything\n'
+      printf '  2) bolt     — same as full (for now)\n'
+      printf '  3) minimal  — core setup only, no package installs\n'
+      printf 'Choice [1]: '
+    } >/dev/tty
+    local ans=""; read -r ans </dev/tty || true
+    case "$ans" in 2|bolt) p=bolt ;; 3|minimal) p=minimal ;; *) p=full ;; esac
+  fi
+  case "$p" in bolt|minimal|full) ;; *) p=full ;; esac
+  printf '%s' "$p"
+}
+PROFILE_SEL="$(choose_profile)"
+
+eval 'PROFILE_KEYS=("${PROFILE_'"$PROFILE_SEL"'[@]}")'
+for k in "${PROFILE_KEYS[@]}"; do add_step "${ITEM_DESC[$k]}" "${ITEM_CMD[$k]}"; done
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
