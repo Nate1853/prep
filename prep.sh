@@ -535,12 +535,12 @@ if [ "$USE_DASH" -eq 1 ]; then
   done
   dash_cleanup
   printf '\n%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  [ "$SHOW_NEXTSTEPS" -eq 1 ] && next_steps
+  if [ "$SHOW_NEXTSTEPS" -eq 1 ]; then next_steps; fi
 else
   echo "${C_DIM}Priming this Fedora machine…${C_RESET}"
   for i in "${!DESCS[@]}"; do
     run_step_plain "$i" || { [ "$i" -le 1 ] && break; }
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
-  [ "$SHOW_NEXTSTEPS" -eq 1 ] && next_steps
+  if [ "$SHOW_NEXTSTEPS" -eq 1 ]; then next_steps; fi
 fi
