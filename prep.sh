@@ -189,7 +189,10 @@ check_amd() {
     echo "AMD CPU, ${gib} GiB RAM usable (DMI unavailable)"
   fi
   [ "$gib" -ge 8 ] || { echo "Only ${gib} GB RAM (need 8 GB+)"; return 1; }
-  echo "##STATUS##${gib}GB, min. 8GB"
+  # CPU model for the status line; trim marketing noise to keep it short.
+  local cpu; cpu="$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
+  cpu="$(printf '%s' "$cpu" | sed -E 's/\((R|TM)\)//g; s/ (CPU|Processor)//g; s/ with .*//; s/  +/ /g; s/^ +| +$//g')"
+  echo "##STATUS##detected: ${cpu:-AMD}, ${gib}GB"
 }
 
 upgrade_system() {
