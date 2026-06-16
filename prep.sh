@@ -376,9 +376,12 @@ set_default_browser() {
 }
 
 pin_taskbar() {
-  # Pin Konsole + Zed to the Icons-Only Task Manager via the Plasma scripting API
-  # (applies live, no relogin). Needs the session bus — set for SSH/non-graphical
-  # runs. NB: Fedora KDE has no qdbus6, so we drive it with gdbus.
+  # Pin Konsole + Zed to the Icons-Only Task Manager. We MERGE into the existing
+  # launchers — but when the applet still uses Plasma's built-in defaults the key
+  # reads back empty, so we must seed a sane default set first; writing just the
+  # two would wipe the whole panel. Applying needs a plasmashell restart
+  # (reloadConfig alone doesn't refresh the launcher model). NB: Fedora KDE has no
+  # qdbus6, so we drive the scripting API with gdbus.
   export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
   if ! gdbus introspect --session --dest org.kde.plasmashell --object-path /PlasmaShell >/dev/null 2>&1; then
     echo "plasmashell not on the session bus — run inside the Plasma session"
@@ -386,7 +389,8 @@ pin_taskbar() {
   fi
 
   local js result
-  js='var apps = ["applications:org.kde.konsole.desktop", "applications:dev.zed.Zed.desktop"];
+  js='var want = ["applications:org.kde.konsole.desktop", "applications:dev.zed.Zed.desktop"];
+var seed = ["applications:systemsettings.desktop","applications:org.kde.discover.desktop","preferred://filemanager","applications:org.kde.konsole.desktop","preferred://browser"];
 var found = 0, added = 0;
 var ps = panels();
 for (var i = 0; i < ps.length; i++) {
@@ -397,9 +401,9 @@ for (var i = 0; i < ps.length; i++) {
       found++;
       ws[j].currentConfigGroup = ["General"];
       var cur = ws[j].readConfig("launchers", "").toString();
-      var arr = cur ? cur.split(",") : [];
-      for (var k = 0; k < apps.length; k++) {
-        if (arr.indexOf(apps[k]) === -1) { arr.push(apps[k]); added++; }
+      var arr = cur ? cur.split(",") : seed.slice();   // empty => seed, never wipe the panel
+      for (var k = 0; k < want.length; k++) {
+        if (arr.indexOf(want[k]) === -1) { arr.push(want[k]); added++; }
       }
       ws[j].writeConfig("launchers", arr.join(","));
       ws[j].reloadConfig();
@@ -412,10 +416,17 @@ print("found=" + found + " added=" + added);'
     --method org.kde.PlasmaShell.evaluateScript "$js" 2>&1)" || { echo "$result"; return 1; }
   echo "$result"
   case "$result" in
-    *found=0*) echo "##WARN##"; echo "##STATUS##no task manager found" ;;
-    *added=0*) echo "##STATUS##already pinned" ;;
-    *)         echo "##STATUS##konsole + zed pinned" ;;
+    *found=0*) echo "##WARN##"; echo "##STATUS##no task manager found"; return 0 ;;
+    *added=0*) echo "##STATUS##already pinned"; return 0 ;;   # no change → no restart
   esac
+
+  # Apply: restart plasmashell so the launcher model actually picks up the change.
+  if systemctl --user is-active --quiet plasma-plasmashell.service; then
+    systemctl --user restart plasma-plasmashell.service
+  else
+    kquitapp6 plasmashell 2>/dev/null; sleep 1; (setsid kstart plasmashell >/dev/null 2>&1 &)
+  fi
+  echo "##STATUS##konsole + zed pinned"
 }
 
 setup_appdir() {
