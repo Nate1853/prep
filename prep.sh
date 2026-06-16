@@ -134,7 +134,13 @@ trap dash_cleanup EXIT INT TERM
 
 # Run command from CMDS[$1]; stream its output (minus markers) above the box.
 _run_capture() { # $1=index  $2=statusfile  -> stdout is the verbose stream
-  ( eval "${CMDS[$1]}" ) 2>&1 | while IFS= read -r line; do
+  # Sanitize the stream: strip ANSI CSI escapes and fold carriage returns. A tool's
+  # in-place progress bar (e.g. dnf5 installing 800 packages) emits cursor-up /
+  # erase-line escapes that would otherwise jump the cursor out of the scroll
+  # region and shatter the pinned status box.
+  ( eval "${CMDS[$1]}" ) 2>&1 \
+    | sed -u 's/\x1b\[[0-9;?=]*[A-Za-z]//g; s/\r$//; s/\r/\n/g' \
+    | while IFS= read -r line; do
     case "$line" in
       '##STATUS##'*) printf '%s' "${line#\#\#STATUS\#\#}" >"$2" ;;
       '##WARN##')    : >"$2.w" ;;
@@ -388,10 +394,13 @@ pin_taskbar() {
     echo "##WARN##"; echo "##STATUS##plasmashell not reachable"; return 0
   fi
 
+  # Build the launcher list as: canonical defaults (in order) ∪ any existing user
+  # entries ∪ Konsole + Zed. Forcing the defaults in means a rerun REPAIRS a panel
+  # an earlier buggy run wiped down to just two icons. Only writes when it differs.
   local js result
   js='var want = ["applications:org.kde.konsole.desktop", "applications:dev.zed.Zed.desktop"];
-var seed = ["applications:systemsettings.desktop","applications:org.kde.discover.desktop","preferred://filemanager","applications:org.kde.konsole.desktop","preferred://browser"];
-var found = 0, added = 0;
+var base = ["applications:systemsettings.desktop","applications:org.kde.discover.desktop","preferred://filemanager","applications:org.kde.konsole.desktop","preferred://browser"];
+var found = 0, changed = 0;
 var ps = panels();
 for (var i = 0; i < ps.length; i++) {
   var ws = ps[i].widgets();
@@ -401,23 +410,23 @@ for (var i = 0; i < ps.length; i++) {
       found++;
       ws[j].currentConfigGroup = ["General"];
       var cur = ws[j].readConfig("launchers", "").toString();
-      var arr = cur ? cur.split(",") : seed.slice();   // empty => seed, never wipe the panel
-      for (var k = 0; k < want.length; k++) {
-        if (arr.indexOf(want[k]) === -1) { arr.push(want[k]); added++; }
-      }
-      ws[j].writeConfig("launchers", arr.join(","));
-      ws[j].reloadConfig();
+      var curArr = cur ? cur.split(",") : [];
+      var out = base.slice();
+      for (var k = 0; k < curArr.length; k++) { if (out.indexOf(curArr[k]) === -1) out.push(curArr[k]); }
+      for (var k = 0; k < want.length;   k++) { if (out.indexOf(want[k])   === -1) out.push(want[k]); }
+      var joined = out.join(",");
+      if (joined !== cur) { ws[j].writeConfig("launchers", joined); ws[j].reloadConfig(); changed++; }
     }
   }
 }
-print("found=" + found + " added=" + added);'
+print("found=" + found + " changed=" + changed);'
 
   result="$(gdbus call --session --dest org.kde.plasmashell --object-path /PlasmaShell \
     --method org.kde.PlasmaShell.evaluateScript "$js" 2>&1)" || { echo "$result"; return 1; }
   echo "$result"
   case "$result" in
-    *found=0*) echo "##WARN##"; echo "##STATUS##no task manager found"; return 0 ;;
-    *added=0*) echo "##STATUS##already pinned"; return 0 ;;   # no change → no restart
+    *found=0*)   echo "##WARN##"; echo "##STATUS##no task manager found"; return 0 ;;
+    *changed=0*) echo "##STATUS##already pinned"; return 0 ;;   # no change → no restart
   esac
 
   # Apply: restart plasmashell so the launcher model actually picks up the change.
