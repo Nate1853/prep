@@ -43,7 +43,7 @@ next_steps() {
 
   printf '\n%sNext steps:%s\n' "$C_HDR" "$C_RESET"
   if [ "$drop" -eq 1 ]; then
-    printf '\n%sdropping you into the project (venv active) — type %sexit%s to come back here.%s\n' \
+    printf '\n%sinstalling dependencies & dropping you into the project (venv active) — type %sexit%s to come back here.%s\n' \
       "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
   else
     if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
@@ -55,8 +55,12 @@ next_steps() {
       printf '  cd %s\n' "$bolt_dir"
     fi
   fi
-  printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
-  printf '  ./install_requirements.sh\n'
+  # Only suggest installing deps when the repo isn't pulled yet (key unregistered);
+  # once it's pulled we cd in and run it automatically (see end of script).
+  if [ ! -d "$bolt_dir/.git" ]; then
+    printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
+    printf '  ./install_requirements.sh\n'
+  fi
   printf '\n%slaunch app:%s\n' "$C_DIM" "$C_RESET"
   printf '  streamlit run src/main.py\n'
 }
@@ -749,11 +753,22 @@ else
   if [ "$SHOW_NEXTSTEPS" -eq 1 ]; then next_steps; fi
 fi
 
-# Land the user inside the project. A child process can't cd the parent shell, so
-# we replace this process with a fresh interactive shell already in the repo dir
-# (which also re-sources ~/.bashrc → venv active). Only when the repo exists and
-# we have a real terminal; `exit` returns to the original shell.
+# Land the user inside the project, dependencies installed. A child process can't
+# cd the parent shell, so we cd here, activate the venv, run the (quiet) installer,
+# then replace this process with a fresh interactive shell already in the repo
+# (re-sources ~/.bashrc → venv active). Only when the repo exists and we have a
+# real terminal; `exit` returns to the original shell.
 BOLT_DIR="${BOLT_DIR:-$HOME/Documents/Applications/refurbishment-ui-bolt}"
 if [ "$SHOW_NEXTSTEPS" -eq 1 ] && [ -d "$BOLT_DIR/.git" ] && [ -e /dev/tty ]; then
-  cd "$BOLT_DIR" 2>/dev/null && exec bash </dev/tty
+  cd "$BOLT_DIR" 2>/dev/null || true
+  # Activate the venv so deps land in the right env (exports PATH for the installer).
+  if [ -f "$HOME/miniconda3/etc/profile.d/conda.sh" ]; then
+    . "$HOME/miniconda3/etc/profile.d/conda.sh" && conda activate venv 2>/dev/null || true
+  fi
+  if [ -f ./install_requirements.sh ]; then
+    bash ./install_requirements.sh || printf '%s‼️  install_requirements.sh failed — install deps manually.%s\n' "$C_RED" "$C_RESET"
+  else
+    printf '%s‼️  install_requirements.sh not found in %s — skipping; install deps manually.%s\n' "$C_RED" "$BOLT_DIR" "$C_RESET"
+  fi
+  exec bash </dev/tty
 fi
