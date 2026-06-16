@@ -56,7 +56,7 @@ next_steps() {
     fi
   fi
   printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
-  printf '  pip install -r requirements.txt\n'
+  printf '  ./install_requirements.sh\n'
   printf '\n%slaunch app:%s\n' "$C_DIM" "$C_RESET"
   printf '  streamlit run src/main.py\n'
 }
