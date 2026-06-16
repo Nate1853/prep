@@ -66,7 +66,7 @@ draw_item() { # $1=index
   local i="$1" icon row st note desc
   st="${STATE[i]}"; note="${NOTE[i]}"; desc="${DESCS[i]}"
   case "$st" in
-    run) icon="⏳";; ok) icon="✅";; already) icon="☑️";; fail) icon="❌";; *) icon="⬜";;
+    run) icon="⏳";; ok) icon="✅";; already) icon="☑️";; warn) icon="‼️";; fail) icon="❌";; *) icon="⬜";;
   esac
   row=$(( DASH_BOX_TOP + 1 + i ))
   local dn=$(( DASH_COLS - 2 - 6 - ${#desc} - ${#note} )); [ "$dn" -lt 1 ] && dn=1
@@ -107,6 +107,7 @@ _run_capture() { # $1=index  $2=statusfile  -> stdout is the verbose stream
   ( eval "${CMDS[$1]}" ) 2>&1 | while IFS= read -r line; do
     case "$line" in
       '##STATUS##'*) printf '%s' "${line#\#\#STATUS\#\#}" >"$2" ;;
+      '##WARN##')    : >"$2.w" ;;
       '##RESTART##') : >"$2.r" ;;
       *)             printf '%s\n' "$line" ;;
     esac
@@ -122,6 +123,7 @@ _status_of() { # $1=rc  $2=statusfile  -> sets REPLY_STATE / REPLY_NOTE
     REPLY_STATE="fail"
   else
     case "$marker" in already*) REPLY_STATE="already";; *) REPLY_STATE="ok";; esac
+    [ -f "$sf.w" ] && REPLY_STATE="warn"
     [ -n "$marker" ] && REPLY_NOTE="($marker)"
   fi
   [ -f "$sf.r" ] && REPLY_NOTE="${REPLY_NOTE:+$REPLY_NOTE }(reboot required)"
@@ -136,7 +138,7 @@ run_step() { # dashboard mode; $1=index
   _status_of "$rc" "$sf"
   STATE[i]="$REPLY_STATE"; NOTE[i]="$REPLY_NOTE"
   draw_item "$i"; goto_scroll
-  rm -f "$sf" "$sf.r"
+  rm -f "$sf" "$sf.r" "$sf.w"
   return "$rc"
 }
 
@@ -146,9 +148,9 @@ run_step_plain() { # fallback (no TTY / tiny terminal); $1=index
   _run_capture "$i" "$sf" | sed 's/^/    /'
   local rc=${PIPESTATUS[0]}
   _status_of "$rc" "$sf"
-  local icon="✅"; case "$REPLY_STATE" in already) icon="☑️";; fail) icon="❌";; esac
+  local icon="✅"; case "$REPLY_STATE" in already) icon="☑️";; warn) icon="‼️";; fail) icon="❌";; esac
   printf '%s %s%s %s\n' "${DESCS[i]}" "${C_DIM}" "${REPLY_NOTE}${C_RESET}" "$icon"
-  rm -f "$sf" "$sf.r"
+  rm -f "$sf" "$sf.r" "$sf.w"
   return "$rc"
 }
 
@@ -172,7 +174,15 @@ check_fedora() {
 }
 
 check_amd() {
-  grep -q "AuthenticAMD" /proc/cpuinfo || { echo "CPU vendor is not AMD"; return 1; }
+  # AMD is the expected vendor (✅). Intel is allowed but flagged non-blocking (‼️).
+  local vendor
+  if grep -q "AuthenticAMD" /proc/cpuinfo; then
+    vendor="AMD"
+  elif grep -q "GenuineIntel" /proc/cpuinfo; then
+    vendor="Intel"; echo "##WARN##"; echo "CPU vendor is Intel (not AMD) — continuing anyway"
+  else
+    echo "CPU vendor is neither AMD nor Intel"; return 1
+  fi
   # Physical installed RAM via DMI (counts memory reserved for the iGPU, unlike MemTotal).
   local mb=0 gib
   if command -v dmidecode >/dev/null 2>&1; then
@@ -182,17 +192,17 @@ check_amd() {
   fi
   if [ "${mb:-0}" -gt 0 ]; then
     gib=$(( (mb + 512) / 1024 ))
-    echo "AMD CPU, ${gib} GB RAM installed"
+    echo "${vendor} CPU, ${gib} GB RAM installed"
   else
     local memkb; memkb="$(awk '/^MemTotal:/{print $2}' /proc/meminfo)"
     gib=$(( (memkb + 524288) / 1048576 ))
-    echo "AMD CPU, ${gib} GiB RAM usable (DMI unavailable)"
+    echo "${vendor} CPU, ${gib} GiB RAM usable (DMI unavailable)"
   fi
   [ "$gib" -ge 8 ] || { echo "Only ${gib} GB RAM (need 8 GB+)"; return 1; }
   # CPU model for the status line; trim marketing noise to keep it short.
   local cpu; cpu="$(awk -F': ' '/^model name/{print $2; exit}' /proc/cpuinfo)"
   cpu="$(printf '%s' "$cpu" | sed -E 's/\((R|TM)\)//g; s/ (CPU|Processor)//g; s/ with .*//; s/  +/ /g; s/^ +| +$//g')"
-  echo "##STATUS##detected: ${cpu:-AMD}, ${gib}GB"
+  echo "##STATUS##detected: ${cpu:-$vendor}, ${gib}GB"
 }
 
 upgrade_system() {
