@@ -25,22 +25,35 @@ next_steps() {
   # Show it (+ what to do) BEFORE the normal next steps. The repo pulls itself on
   # the next run, once the key is in place — no manual clone needed.
   if [ ! -d "$bolt_dir/.git" ] && [ -f "$bolt_key.pub" ]; then
-    printf '\n%sRegister this machine with GitHub to get the project:%s\n' "$C_HDR" "$C_RESET"
-    printf '%s  Add the key below as a deploy key (✅ tick "Allow write access"):%s\n' "$C_DIM" "$C_RESET"
-    printf '  → https://github.com/ubiquiti/refurbishment-ui-bolt/settings/keys → Add deploy key\n'
-    printf '%s  Title: %s   (match this machine'\''s hostname)%s\n\n' "$C_DIM" "$(hostname -s)" "$C_RESET"
-    printf '%s\n\n' "$(cat "$bolt_key.pub")"
-    printf '%s  Project will be pulled once the key is registered — just rerun this script.%s\n' "$C_DIM" "$C_RESET"
+    printf '\n%s━━ Register this machine with GitHub ━━%s\n' "$C_HDR" "$C_RESET"
+    printf '%sThe project pulls itself once this deploy key is registered:%s\n\n' "$C_DIM" "$C_RESET"
+    printf '  %s1%s  open    https://github.com/ubiquiti/refurbishment-ui-bolt/settings/keys\n' "$C_HDR" "$C_RESET"
+    printf '  %s2%s  click   "Add deploy key"\n' "$C_HDR" "$C_RESET"
+    printf '  %s3%s  title   %s\n' "$C_HDR" "$C_RESET" "$(hostname -s)"
+    printf '  %s4%s  tick    ✅ "Allow write access"  %s— only if truly needed%s\n' "$C_HDR" "$C_RESET" "$C_DIM" "$C_RESET"
+    printf '  %s5%s  paste   the key below\n\n' "$C_HDR" "$C_RESET"
+    printf '%s%s%s\n\n' "$C_GREEN" "$(cat "$bolt_key.pub")" "$C_RESET"
+    printf '%sThen rerun this script.%s\n' "$C_DIM" "$C_RESET"
   fi
 
+  # When we can, the script ends by dropping the user straight into the repo in a
+  # fresh shell (see end of file). In that case the venv/cd hints are redundant.
+  local drop=0
+  [ -d "$bolt_dir/.git" ] && [ -e /dev/tty ] && drop=1
+
   printf '\n%sNext steps:%s\n' "$C_HDR" "$C_RESET"
-  if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
-    printf '\n%sactivate venv:%s\n' "$C_DIM" "$C_RESET"
-    printf '  exec bash\n'
-  fi
-  if [ -d "$bolt_dir/.git" ]; then
-    printf '\n%senter the project:%s\n' "$C_DIM" "$C_RESET"
-    printf '  cd %s\n' "$bolt_dir"
+  if [ "$drop" -eq 1 ]; then
+    printf '\n%sdropping you into the project (venv active) — type %sexit%s to come back here.%s\n' \
+      "$C_DIM" "$C_RESET" "$C_DIM" "$C_RESET"
+  else
+    if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
+      printf '\n%sactivate venv:%s\n' "$C_DIM" "$C_RESET"
+      printf '  exec bash\n'
+    fi
+    if [ -d "$bolt_dir/.git" ]; then
+      printf '\n%senter the project:%s\n' "$C_DIM" "$C_RESET"
+      printf '  cd %s\n' "$bolt_dir"
+    fi
   fi
   printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
   printf '  pip install -r requirements.txt\n'
@@ -274,6 +287,16 @@ install_tailscale() {
     echo "##STATUS##already installed"; return 0
   fi
   curl -fsSL https://tailscale.com/install.sh | sh 2>&1 || return 1
+  echo "##STATUS##successfully installed"
+}
+
+install_zed() {
+  # Official per-user installer -> ~/.local/zed.app + a ~/.local/bin/zed symlink.
+  # No sudo; runs as the current user.
+  if [ -x "$HOME/.local/bin/zed" ] || command -v zed >/dev/null 2>&1; then
+    echo "##STATUS##already installed"; return 0
+  fi
+  curl -fsSL https://zed.dev/install.sh | sh 2>&1 || return 1
   echo "##STATUS##successfully installed"
 }
 
@@ -648,6 +671,7 @@ item nosleep   "Never sleep when idle"          "set_no_sleep"
 item fastfetch "Install fastfetch"              "install_pkg fastfetch"
 item chrome    "Install Google Chrome"          "install_chrome"
 item tailscale "Install Tailscale"              "install_tailscale"
+item zed       "Install Zed editor"             "install_zed"
 item browser   "Set Chrome as default browser"  "set_default_browser"
 item sshpass   "Install sshpass"                "install_pkg sshpass"
 item expect    "Install expect"                 "install_pkg expect"
@@ -663,7 +687,7 @@ item boltrepo  "Deploy key + clone/pull bolt repo" "setup_bolt_repo"
 # ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
 # keep fedora+amd first (they gate the run). "nextsteps" is a post-run flag
 # (prints the closing checklist), not a dashboard step.
-PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep tailscale fastfetch chrome browser \
+PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep tailscale zed fastfetch chrome browser \
               sshpass expect cups arping nettools iperf3 conda venvlogin appdir boltrepo nextsteps)
 PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
 PROFILE_minimal=(fedora amd upgrade ssh krdp autologin vkms nosleep)  # core only, no installs / no next-steps
@@ -723,4 +747,13 @@ else
   done
   printf '%sDone.%s\n' "$C_GREEN" "$C_RESET"
   if [ "$SHOW_NEXTSTEPS" -eq 1 ]; then next_steps; fi
+fi
+
+# Land the user inside the project. A child process can't cd the parent shell, so
+# we replace this process with a fresh interactive shell already in the repo dir
+# (which also re-sources ~/.bashrc → venv active). Only when the repo exists and
+# we have a real terminal; `exit` returns to the original shell.
+BOLT_DIR="${BOLT_DIR:-$HOME/Documents/Applications/refurbishment-ui-bolt}"
+if [ "$SHOW_NEXTSTEPS" -eq 1 ] && [ -d "$BOLT_DIR/.git" ] && [ -e /dev/tty ]; then
+  cd "$BOLT_DIR" 2>/dev/null && exec bash </dev/tty
 fi
