@@ -464,10 +464,13 @@ Host github.com
 EOF
   fi
 
-  # 4. git identity, only if unset (GIT_EMAIL/GIT_NAME collected before the dashboard).
-  if [ -z "$(git config --global user.email 2>/dev/null)" ] && [ -n "${GIT_EMAIL:-}" ]; then
-    git config --global user.email "$GIT_EMAIL"
-    git config --global user.name  "${GIT_NAME:-$GIT_EMAIL}"
+  # 4. git identity, only if unset — prompt for it here, right when it's needed.
+  if [ -z "$(git config --global user.email 2>/dev/null)" ]; then
+    choose_git_email
+    if [ -n "${GIT_EMAIL:-}" ]; then
+      git config --global user.email "$GIT_EMAIL"
+      git config --global user.name  "${GIT_NAME:-$GIT_EMAIL}"
+    fi
   fi
 
   # 5. Try to reach the repo. BatchMode/accept-new => never prompt, never hang.
@@ -490,11 +493,10 @@ EOF
   fi
 }
 
-# Ask once (before the dashboard) for the UI username; append @ui.com and derive a
-# display name. Keeps the email out of this public script. Only when the bolt step
-# is in the profile and git identity isn't already set.
+# Ask for the UI username (we append @ui.com and derive a display name) — called
+# from the bolt step, right when the git identity is needed. Keeps the email out
+# of this public script. No-op without a tty (e.g. cron) or if already set.
 choose_git_email() {
-  case " ${PROFILE_KEYS[*]} " in *" boltrepo "*) ;; *) return 0 ;; esac
   [ -n "$(git config --global user.email 2>/dev/null)" ] && return 0
   [ -e /dev/tty ] || return 0
   local lp=""
@@ -765,9 +767,6 @@ for k in "${PROFILE_KEYS[@]}"; do
   add_step "${ITEM_DESC[$k]}" "${ITEM_CMD[$k]}"
 done
 SHOW_NEXTSTEPS=0; case " ${PROFILE_KEYS[*]} " in *" nextsteps "*) SHOW_NEXTSTEPS=1 ;; esac
-
-# Collect the git email up front (prompt), before the dashboard takes the screen.
-choose_git_email
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
