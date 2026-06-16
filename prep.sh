@@ -18,16 +18,29 @@ banner() { printf '\n%s━━━━━━━━━━ %s ━━━━━━━�
 
 # Closing checklist. Skips steps that are already done.
 next_steps() {
+  local bolt_dir="${BOLT_DIR:-$HOME/Documents/Applications/refurbishment-ui-bolt}"
+  local bolt_key="${BOLT_KEY:-$HOME/.ssh/id_ed25519_bolt}"
+
+  # No repo yet but a key exists => the deploy key isn't registered with GitHub.
+  # Show it (+ what to do) BEFORE the normal next steps. The repo pulls itself on
+  # the next run, once the key is in place — no manual clone needed.
+  if [ ! -d "$bolt_dir/.git" ] && [ -f "$bolt_key.pub" ]; then
+    printf '\n%sRegister this machine with GitHub to get the project:%s\n' "$C_HDR" "$C_RESET"
+    printf '%s  Add the key below as a deploy key (✅ tick "Allow write access"):%s\n' "$C_DIM" "$C_RESET"
+    printf '  → https://github.com/ubiquiti/refurbishment-ui-bolt/settings/keys → Add deploy key\n'
+    printf '%s  Title: %s   (match this machine'\''s hostname)%s\n\n' "$C_DIM" "$(hostname -s)" "$C_RESET"
+    printf '%s\n\n' "$(cat "$bolt_key.pub")"
+    printf '%s  Project will be pulled once the key is registered — just rerun this script.%s\n' "$C_DIM" "$C_RESET"
+  fi
+
   printf '\n%sNext steps:%s\n' "$C_HDR" "$C_RESET"
   if [ "${CONDA_DEFAULT_ENV:-}" != "venv" ]; then
     printf '\n%sactivate venv:%s\n' "$C_DIM" "$C_RESET"
     printf '  exec bash\n'
   fi
-  if [ ! -d "$HOME/Documents/Applications/refurbishment-ui-bolt" ]; then
-    printf '\n%sget the project when ready and when prompted for use your USERNAME(not email) + PAT):%s\n' "$C_DIM" "$C_RESET"
-    printf '  cd ~/Documents/Applications\n'
-    printf '  git clone https://github.com/ubiquiti/refurbishment-ui-bolt.git\n'
-    printf '  cd refurbishment-ui-bolt/\n'
+  if [ -d "$bolt_dir/.git" ]; then
+    printf '\n%senter the project:%s\n' "$C_DIM" "$C_RESET"
+    printf '  cd %s\n' "$bolt_dir"
   fi
   printf '\n%sverify dependencies:%s\n' "$C_DIM" "$C_RESET"
   printf '  pip install -r requirements.txt\n'
@@ -253,6 +266,17 @@ EOF
   echo "##STATUS##successfully installed"
 }
 
+install_tailscale() {
+  # Official installer (adds the repo + installs tailscale/tailscaled). It uses
+  # sudo internally — already cached for this run. Doesn't run `tailscale up`
+  # (that needs interactive auth); just installs.
+  if command -v tailscale >/dev/null 2>&1; then
+    echo "##STATUS##already installed"; return 0
+  fi
+  curl -fsSL https://tailscale.com/install.sh | sh 2>&1 || return 1
+  echo "##STATUS##successfully installed"
+}
+
 setup_conda() {
   local changed=0
   local conda="$HOME/miniconda3/bin/conda"
@@ -331,6 +355,87 @@ setup_appdir() {
   fi
   mkdir -p "$d" || return 1
   echo "##STATUS##created"
+}
+
+# Repo coordinates — reused by setup_bolt_repo and next_steps.
+BOLT_DIR="$HOME/Documents/Applications/refurbishment-ui-bolt"
+BOLT_REPO="git@github.com:ubiquiti/refurbishment-ui-bolt.git"
+BOLT_KEY="$HOME/.ssh/id_ed25519_bolt"
+
+setup_bolt_repo() {
+  # Per-machine SSH deploy key for the bolt repo (replaces HTTPS+PAT). Idempotent.
+  # If the key isn't registered with GitHub yet, the repo can't clone — we leave
+  # the public key for next_steps to print. Once it's registered, a rerun pulls.
+  mkdir -p "$HOME/.ssh" && chmod 700 "$HOME/.ssh"
+
+  # 1. ssh-agent user socket so AddKeysToAgent works in GUI + plain ssh shells.
+  systemctl --user enable --now ssh-agent.socket >/dev/null 2>&1 || true
+  if ! grep -q "ssh-agent.socket" "$HOME/.bashrc" 2>/dev/null; then
+    printf '\n# ssh-agent (systemd user socket) for SSH/non-plasma shells\nexport SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-$XDG_RUNTIME_DIR/ssh-agent.socket}"\n' >> "$HOME/.bashrc"
+  fi
+  export SSH_AUTH_SOCK="${SSH_AUTH_SOCK:-$XDG_RUNTIME_DIR/ssh-agent.socket}"
+
+  # 2. Deploy key (passphraseless, dedicated to this one repo — limited blast radius).
+  if [ ! -f "$BOLT_KEY" ]; then
+    ssh-keygen -t ed25519 -C "$(hostname -s) refurbishment-ui-bolt deploy" -f "$BOLT_KEY" -N "" >/dev/null || return 1
+  fi
+
+  # 3. Route github.com through the key (idempotent — only append our block once).
+  touch "$HOME/.ssh/config" && chmod 600 "$HOME/.ssh/config"
+  if ! grep -qE "^[[:space:]]*Host[[:space:]]+github\.com" "$HOME/.ssh/config" 2>/dev/null; then
+    cat >> "$HOME/.ssh/config" <<EOF
+
+Host github.com
+    HostName github.com
+    User git
+    IdentityFile $BOLT_KEY
+    IdentitiesOnly yes
+    AddKeysToAgent yes
+EOF
+  fi
+
+  # 4. git identity, only if unset (GIT_EMAIL/GIT_NAME collected before the dashboard).
+  if [ -z "$(git config --global user.email 2>/dev/null)" ] && [ -n "${GIT_EMAIL:-}" ]; then
+    git config --global user.email "$GIT_EMAIL"
+    git config --global user.name  "${GIT_NAME:-$GIT_EMAIL}"
+  fi
+
+  # 5. Try to reach the repo. BatchMode/accept-new => never prompt, never hang.
+  export GIT_SSH_COMMAND="ssh -o BatchMode=yes -o StrictHostKeyChecking=accept-new"
+  if git ls-remote "$BOLT_REPO" >/dev/null 2>&1; then
+    if [ -d "$BOLT_DIR/.git" ]; then
+      if git -C "$BOLT_DIR" pull --ff-only 2>&1; then
+        echo "##STATUS##repo up to date"
+      else
+        echo "##WARN##"; echo "##STATUS##pull skipped (local changes)"
+      fi
+    else
+      git clone "$BOLT_REPO" "$BOLT_DIR" 2>&1 || return 1
+      echo "##STATUS##repo cloned"
+    fi
+  else
+    # Key not registered (or offline) — next_steps prints the key + instructions.
+    echo "deploy key not yet registered with GitHub — see closing instructions"
+    echo "##WARN##"; echo "##STATUS##register deploy key"
+  fi
+}
+
+# Ask once (before the dashboard) for the UI username; append @ui.com and derive a
+# display name. Keeps the email out of this public script. Only when the bolt step
+# is in the profile and git identity isn't already set.
+choose_git_email() {
+  case " ${PROFILE_KEYS[*]} " in *" boltrepo "*) ;; *) return 0 ;; esac
+  [ -n "$(git config --global user.email 2>/dev/null)" ] && return 0
+  [ -e /dev/tty ] || return 0
+  local lp=""
+  while [ -z "$lp" ]; do
+    printf '\nGit email — enter your UI username, e.g. john.doe (we append @ui.com): ' >/dev/tty
+    read -r lp </dev/tty || return 0
+    lp="${lp%@ui.com}"; lp="${lp// /}"
+  done
+  export GIT_EMAIL="${lp}@ui.com"
+  export GIT_NAME="$(printf '%s' "$lp" | tr '._-' '   ' | awk '{for(i=1;i<=NF;i++)$i=toupper(substr($i,1,1)) substr($i,2)}1')"
+  printf '  → %s  (%s)\n' "$GIT_EMAIL" "$GIT_NAME" >/dev/tty
 }
 
 set_no_sleep() {
@@ -542,6 +647,7 @@ item vkms      "Virtual display (vkms)"         "enable_vkms"
 item nosleep   "Never sleep when idle"          "set_no_sleep"
 item fastfetch "Install fastfetch"              "install_pkg fastfetch"
 item chrome    "Install Google Chrome"          "install_chrome"
+item tailscale "Install Tailscale"              "install_tailscale"
 item browser   "Set Chrome as default browser"  "set_default_browser"
 item sshpass   "Install sshpass"                "install_pkg sshpass"
 item expect    "Install expect"                 "install_pkg expect"
@@ -552,12 +658,13 @@ item iperf3    "Install iperf3"                 "install_pkg iperf3"
 item conda     "Conda + venv (python 3.12.11)"  "setup_conda"
 item venvlogin "Activate venv on login"         "activate_venv"
 item appdir    "Documents/Applications folder"  "setup_appdir"
+item boltrepo  "Deploy key + clone/pull bolt repo" "setup_bolt_repo"
 
 # ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
 # keep fedora+amd first (they gate the run). "nextsteps" is a post-run flag
 # (prints the closing checklist), not a dashboard step.
-PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep fastfetch chrome browser \
-              sshpass expect cups arping nettools iperf3 conda venvlogin appdir nextsteps)
+PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep tailscale fastfetch chrome browser \
+              sshpass expect cups arping nettools iperf3 conda venvlogin appdir boltrepo nextsteps)
 PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
 PROFILE_minimal=(fedora amd upgrade ssh krdp autologin vkms nosleep)  # core only, no installs / no next-steps
 
@@ -586,6 +693,9 @@ for k in "${PROFILE_KEYS[@]}"; do
   add_step "${ITEM_DESC[$k]}" "${ITEM_CMD[$k]}"
 done
 SHOW_NEXTSTEPS=0; case " ${PROFILE_KEYS[*]} " in *" nextsteps "*) SHOW_NEXTSTEPS=1 ;; esac
+
+# Collect the git email up front (prompt), before the dashboard takes the screen.
+choose_git_email
 
 # ---- ask for sudo once, keep it alive until the script exits ----
 sudo -v
