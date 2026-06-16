@@ -375,6 +375,49 @@ set_default_browser() {
   echo "##STATUS##successfully configured"
 }
 
+pin_taskbar() {
+  # Pin Konsole + Zed to the Icons-Only Task Manager via the Plasma scripting API
+  # (applies live, no relogin). Needs the session bus — set for SSH/non-graphical
+  # runs. NB: Fedora KDE has no qdbus6, so we drive it with gdbus.
+  export DBUS_SESSION_BUS_ADDRESS="${DBUS_SESSION_BUS_ADDRESS:-unix:path=$XDG_RUNTIME_DIR/bus}"
+  if ! gdbus introspect --session --dest org.kde.plasmashell --object-path /PlasmaShell >/dev/null 2>&1; then
+    echo "plasmashell not on the session bus — run inside the Plasma session"
+    echo "##WARN##"; echo "##STATUS##plasmashell not reachable"; return 0
+  fi
+
+  local js result
+  js='var apps = ["applications:org.kde.konsole.desktop", "applications:dev.zed.Zed.desktop"];
+var found = 0, added = 0;
+var ps = panels();
+for (var i = 0; i < ps.length; i++) {
+  var ws = ps[i].widgets();
+  for (var j = 0; j < ws.length; j++) {
+    var t = ws[j].type;
+    if (t.indexOf("tasks") > -1 || t.indexOf("taskmanager") > -1) {
+      found++;
+      ws[j].currentConfigGroup = ["General"];
+      var cur = ws[j].readConfig("launchers", "").toString();
+      var arr = cur ? cur.split(",") : [];
+      for (var k = 0; k < apps.length; k++) {
+        if (arr.indexOf(apps[k]) === -1) { arr.push(apps[k]); added++; }
+      }
+      ws[j].writeConfig("launchers", arr.join(","));
+      ws[j].reloadConfig();
+    }
+  }
+}
+print("found=" + found + " added=" + added);'
+
+  result="$(gdbus call --session --dest org.kde.plasmashell --object-path /PlasmaShell \
+    --method org.kde.PlasmaShell.evaluateScript "$js" 2>&1)" || { echo "$result"; return 1; }
+  echo "$result"
+  case "$result" in
+    *found=0*) echo "##WARN##"; echo "##STATUS##no task manager found" ;;
+    *added=0*) echo "##STATUS##already pinned" ;;
+    *)         echo "##STATUS##konsole + zed pinned" ;;
+  esac
+}
+
 setup_appdir() {
   local d="$HOME/Documents/Applications"
   if [ -d "$d" ]; then
@@ -677,6 +720,7 @@ item chrome    "Install Google Chrome"          "install_chrome"
 item tailscale "Install Tailscale"              "install_tailscale"
 item zed       "Install Zed editor"             "install_zed"
 item browser   "Set Chrome as default browser"  "set_default_browser"
+item taskbar   "Pin Konsole + Zed to taskbar"   "pin_taskbar"
 item sshpass   "Install sshpass"                "install_pkg sshpass"
 item expect    "Install expect"                 "install_pkg expect"
 item cups      "Install cups"                   "install_pkg cups"
@@ -691,7 +735,7 @@ item boltrepo  "Deploy key + clone/pull bolt repo" "setup_bolt_repo"
 # ---- profiles: ordered lists of item keys. EDIT THESE to taste. ----
 # keep fedora+amd first (they gate the run). "nextsteps" is a post-run flag
 # (prints the closing checklist), not a dashboard step.
-PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep tailscale zed fastfetch chrome browser \
+PROFILE_full=(fedora amd upgrade ssh krdp autologin vkms nosleep tailscale zed fastfetch chrome browser taskbar \
               sshpass expect cups arping nettools iperf3 conda venvlogin appdir boltrepo nextsteps)
 PROFILE_bolt=("${PROFILE_full[@]}")                       # bolt == full for now
 PROFILE_minimal=(fedora amd upgrade ssh krdp autologin vkms nosleep)  # core only, no installs / no next-steps
