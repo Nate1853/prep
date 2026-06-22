@@ -617,11 +617,13 @@ enable_krdp() {
   if systemctl is-active --quiet firewalld; then
     sudo firewall-cmd --query-port=3389/tcp >/dev/null 2>&1 || fw_ok=0
   fi
+  local override_file="$HOME/.config/systemd/user/app-org.kde.krdpserver.service.d/override.conf"
   if command -v krdpserver >/dev/null 2>&1 \
      && [ -f "$crt" ] && [ -f "$key" ] \
      && [ "$(kreadconfig6 --file krdpserverrc --group General --key SystemUserEnabled)" = "true" ] \
      && [ "$(kreadconfig6 --file krdpserverrc --group General --key Autostart)" = "true" ] \
      && systemctl --user is-active --quiet app-org.kde.krdpserver.service \
+     && grep -q "NoNewPrivileges=false" "$override_file" 2>/dev/null \
      && [ "$fw_ok" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
@@ -636,6 +638,13 @@ enable_krdp() {
   kwriteconfig6 --file krdpserverrc --group General --key CertificateKey "$key" || return 1
   kwriteconfig6 --file krdpserverrc --group General --key SystemUserEnabled true || return 1
   kwriteconfig6 --file krdpserverrc --group General --key Autostart true || return 1
+
+  # krdp 6.7.0 added NoNewPrivileges=true to the upstream service file, which strips
+  # the setuid bit from unix_chkpwd and breaks PAM password auth entirely.
+  local override_dir="$HOME/.config/systemd/user/app-org.kde.krdpserver.service.d"
+  mkdir -p "$override_dir"
+  printf '[Service]\nNoNewPrivileges=false\n' > "$override_dir/override.conf"
+  systemctl --user daemon-reload
 
   systemctl --user enable --now app-org.kde.krdpserver.service || return 1
 
