@@ -694,19 +694,26 @@ enable_autologin() {
   local kw_done=0
   [ "$(kreadconfig6 --file kwalletrc --group Wallet --key Enabled 2>/dev/null)" = "false" ] && kw_done=1
 
+  # 4. kded networkmanagement module: disable it. It acts as the NM secrets agent
+  #    and prompts for WiFi passwords when connecting to unsaved networks. On this
+  #    test bench SSIDs change for every AP under test, so the prompt fires constantly.
+  local nm_done=0
+  [ "$(kreadconfig6 --file kded6rc --group Module-networkmanagement --key autoload 2>/dev/null)" = "false" ] && nm_done=1
+
   # Drop any stale SDDM drop-in we may have written on a prior run with the
   # wrong DM, unless SDDM is the one actually in use.
   if [ "$dir" != /etc/sddm.conf.d ] && [ -f /etc/sddm.conf.d/10-autologin.conf ]; then
     sudo rm -f /etc/sddm.conf.d/10-autologin.conf || true
   fi
 
-  if [ "$(sudo cat "$conf" 2>/dev/null)" = "$want" ] && [ "$kw_done" -eq 1 ]; then
+  if [ "$(sudo cat "$conf" 2>/dev/null)" = "$want" ] && [ "$kw_done" -eq 1 ] && [ "$nm_done" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
 
   sudo mkdir -p "$dir" || return 1
   printf '%s\n' "$want" | sudo tee "$conf" >/dev/null || return 1
   kwriteconfig6 --file kwalletrc --group Wallet --key Enabled false || return 1
+  kwriteconfig6 --file kded6rc --group Module-networkmanagement --key autoload false || return 1
 
   echo "##STATUS##successfully configured"
 }
