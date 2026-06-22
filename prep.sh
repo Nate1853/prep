@@ -646,7 +646,8 @@ enable_krdp() {
   printf '[Service]\nNoNewPrivileges=false\n' > "$override_dir/override.conf"
   systemctl --user daemon-reload
 
-  systemctl --user enable --now app-org.kde.krdpserver.service || return 1
+  systemctl --user enable app-org.kde.krdpserver.service || return 1
+  systemctl --user restart app-org.kde.krdpserver.service || return 1
 
   if systemctl is-active --quiet firewalld; then
     sudo firewall-cmd --permanent --add-port=3389/tcp || return 1
