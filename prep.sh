@@ -534,17 +534,19 @@ set_no_sleep() {
   # Never auto-suspend/hibernate on idle (monitor/screen blanking left untouched).
   # Three layers: mask sleep targets (authoritative — any suspend is refused),
   # logind IdleAction=ignore, and set KDE PowerDevil "When inactive -> Do nothing".
+  # Screen locker is kept enabled but bumped to 10 min (default is 5).
   local targets="sleep.target suspend.target hibernate.target hybrid-sleep.target"
   local ld=/etc/systemd/logind.conf.d/10-no-idle.conf
-  local masked=1 pd_done=0 t
+  local masked=1 pd_done=0 lock_done=0 t
 
   for t in $targets; do
     [ "$(systemctl is-enabled "$t" 2>/dev/null)" = "masked" ] || masked=0
   done
   # Plasma 6 stores "When inactive" in powerdevilrc; 0 = Do nothing.
   [ "$(kreadconfig6 --file powerdevilrc --group AC --group SuspendAndShutdown --key AutoSuspendAction 2>/dev/null)" = "0" ] && pd_done=1
+  [ "$(kreadconfig6 --file kscreenlockerrc --group Daemon --key Timeout 2>/dev/null)" = "10" ] && lock_done=1
 
-  if [ "$masked" -eq 1 ] && [ -f "$ld" ] && [ "$pd_done" -eq 1 ]; then
+  if [ "$masked" -eq 1 ] && [ -f "$ld" ] && [ "$pd_done" -eq 1 ] && [ "$lock_done" -eq 1 ]; then
     echo "##STATUS##already configured"; return 0
   fi
 
@@ -556,6 +558,10 @@ set_no_sleep() {
   kwriteconfig6 --file powerdevilrc --group AC --group SuspendAndShutdown --key AutoSuspendAction 0 || return 1
   qdbus  org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement reparseConfiguration 2>/dev/null \
     || qdbus6 org.kde.Solid.PowerManagement /org/kde/Solid/PowerManagement reparseConfiguration 2>/dev/null || true
+
+  # Screen locker: keep it on but push timeout to 10 min.
+  kwriteconfig6 --file kscreenlockerrc --group Daemon --key Autolock true || return 1
+  kwriteconfig6 --file kscreenlockerrc --group Daemon --key Timeout 10 || return 1
 
   echo "##STATUS##successfully configured"
 }
